@@ -47,6 +47,7 @@ import asyncio
 import csv
 import json
 import logging
+from logging.handlers import RotatingFileHandler
 import os
 import random
 import re
@@ -74,10 +75,18 @@ USER_DATA_DIR = str(BASE_DIR / ".chrome-profile-bot")
 LOG_FILE = BASE_DIR / "takip.log"
 # ==================================================
 
+# Log disk disiplini: dosya 5 MB'ı geçince döner, en fazla 2 yedek tutulur
+# (takip.log + .1 + .2 ≈ 15 MB tavan — sınırsız büyüme yok). Konsol çıktısı
+# sadece elle çalıştırırken açılır; gözetmen/launchd altında kapalıdır ki
+# launchd.log şişmesin (her şey zaten takip.log'da).
+_log_handlers: list = [RotatingFileHandler(LOG_FILE, maxBytes=5_000_000,
+                                           backupCount=2, encoding="utf-8")]
+if sys.stderr.isatty():
+    _log_handlers.append(logging.StreamHandler())
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(), logging.FileHandler(LOG_FILE, encoding="utf-8")],
+    handlers=_log_handlers,
 )
 if os.getenv("STOCKBOT_DEBUG", "false").lower() == "true":
     logging.getLogger().setLevel(logging.DEBUG)

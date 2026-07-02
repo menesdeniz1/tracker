@@ -34,6 +34,7 @@ Elle değişiklik algılanırsa güncelleme bekletilir ve Telegram'a uyarı gide
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -65,15 +66,56 @@ SMOKE_CMD = BOT_CMD + ["smoke"]
 STATE_DOSYA = BASE / "guncelleyici_state.json"
 LOG_DOSYA = BASE / "guncelleyici.log"
 
+# Tarayıcı profili önbelleği zamanla GB'larca şişebilir (blob_storage, Cache...).
+# Bu limit aşılırsa, bot KAPALIYKEN önbellek dizinleri silinir — çerez/oturum
+# verisine dokunulmaz, Chromium önbelleği kendisi yeniden kurar.
+PROFIL = BASE / ".chrome-profile-bot"
+PROFIL_LIMIT_MB = int(os.environ.get("TAKIP_PROFIL_LIMIT_MB", "700"))
+PROFIL_CACHE_DIZINLERI = [
+    "Default/Cache", "Default/Code Cache", "Default/GPUCache",
+    "Default/blob_storage", "Default/Service Worker/CacheStorage",
+    "Default/Service Worker/ScriptCache", "Default/DawnGraphiteCache",
+    "Default/DawnWebGPUCache", "GrShaderCache", "ShaderCache", "GraphiteDawnCache",
+]
+
 
 def log(mesaj):
     satir = f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} [gözetmen] {mesaj}"
     print(satir, flush=True)
     try:
+        # Basit rotasyon: 2 MB'ı geçince tek yedeğe devril (toplam ~4 MB tavan)
+        if LOG_DOSYA.exists() and LOG_DOSYA.stat().st_size > 2_000_000:
+            yedek = BASE / "guncelleyici.log.1"
+            yedek.unlink(missing_ok=True)
+            LOG_DOSYA.rename(yedek)
         with open(LOG_DOSYA, "a", encoding="utf-8") as f:
             f.write(satir + "\n")
     except OSError:
         pass
+
+
+def profil_temizle():
+    """Profil PROFIL_LIMIT_MB'ı aştıysa önbellek dizinlerini siler.
+    Sadece bot kapalıyken çağrılır (ana döngü, yeniden başlatma öncesi)."""
+    if not PROFIL.exists():
+        return
+    boyut = 0
+    for kok, _, dosyalar in os.walk(PROFIL):
+        for d in dosyalar:
+            try:
+                boyut += os.path.getsize(os.path.join(kok, d))
+            except OSError:
+                pass
+    mb = boyut / 1_000_000
+    if mb < PROFIL_LIMIT_MB:
+        return
+    log(f"Tarayıcı profili {mb:.0f} MB (limit {PROFIL_LIMIT_MB} MB) — "
+        "önbellek dizinleri temizleniyor (çerezlere dokunulmaz)...")
+    for rel in PROFIL_CACHE_DIZINLERI:
+        hedef = PROFIL / rel
+        if hedef.exists():
+            shutil.rmtree(hedef, ignore_errors=True)
+    log("Profil önbelleği temizlendi.")
 
 
 # ---------------- Telegram (stdlib ile, bot koddan bağımsız) ----------------
@@ -304,6 +346,10 @@ def main():
                 son_yoklama = time.time()
                 if sonuc == "kendim":
                     kendini_yeniden_baslat()
+                try:
+                    profil_temizle()   # bot kapalıyken güvenli tek an burası
+                except Exception as e:
+                    log(f"Profil temizliği atlandı: {type(e).__name__}: {e}")
                 cocuk = bot_baslat()
                 baslama_ts = time.time()
                 iyi_isaretlendi = False

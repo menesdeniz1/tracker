@@ -161,6 +161,25 @@ Akakçe'de en ucuz satıcının adı da bildirime eklenir.
 | `calistir.bat` | Windows başlatıcı (gözetmeni ayakta tutar) |
 | `takip-botu.service` | Linux/RaspberryPi systemd şablonu (gözetmeni ayakta tutar) |
 | `guncelleyici_state.json` | Gözetmen durumu: son iyi sürüm + bozuk commit (otomatik) |
+| `tests/` | pytest birim testleri (parser, karar mantığı, göç, grafik) |
+| `.github/workflows/ci.yml` | CI: her push'ta testler + smoke — hata push anında görünür |
+
+## Testler, CI ve disk disiplini
+
+```bash
+venv/bin/pip install -r requirements-dev.txt && venv/bin/python -m pytest
+```
+
+Her push GitHub Actions'ta otomatik test edilir (birim testleri + smoke +
+gözetmenin Python 3.9 uyumluluğu) — bozuk kod bot makinesine ulaşmadan
+kırmızı ✗ olarak görünür; gözetmen ikinci savunma hattıdır.
+`requirements.txt` sürümleri bilerek sabittir: yükseltme = sürümü değiştir,
+push'la, CI + smoke + canary korur.
+
+Disk asla dolmaz: `takip.log` 5 MB'da döner (en çok ~15 MB), `guncelleyici.log`
+2 MB'da döner (~4 MB), tarayıcı profili önbelleği 700 MB'ı aşarsa bot yeniden
+başlarken otomatik temizlenir (çerezler/oturumlar korunur;
+`TAKIP_PROFIL_LIMIT_MB` ile ayarlanır).
 | `state.json` | Bildirim durumu + günlük minimumlar (otomatik oluşur) |
 | `fiyat_gecmisi.csv` | Her okuma: `zaman;urun;site;fiyat;stok;kaynak` |
 | `takip.log` | Çalışma logu |

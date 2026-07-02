@@ -1,0 +1,37 @@
+# CI: her push'ta testler + smoke — bozuk kod bot makinesine hiç ulaşmadan
+# GitHub'da yakalanır. (Bot makinesindeki gözetmen ikinci savunma hattıdır:
+# smoke geçmeyen push'u geri alır; buradaki amaç hatayı push ANINDA görmek.)
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Gözetmen bot makinelerinde SİSTEM Python'uyla çalışır (macOS'ta 3.9) —
+      # yeni sözdizimi kaçağı olmasın diye 3.9 ile derleme kontrolü
+      - name: Gözetmen 3.9 uyumluluk kontrolü
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - run: python -m py_compile guncelleyici.py
+
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Bağımlılıklar
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Birim testleri
+        run: python -m pytest -q
+
+      # Botun kendi sağlık kontrolü: import + konfig yüklemesi (tarayıcı gerekmez)
+      - name: Smoke testi
+        run: python takip_botu_pro.py smoke

@@ -1,2 +1,6 @@
-playwright>=1.44
-PyYAML>=6.0
+# Sürümler bilerek SABİT: gözetmen güncellemede "pip install -r" çalıştırır;
+# sürüm serbest olursa sürpriz major güncelleme seçicileri/API'yi kırabilir.
+# Yükseltme bilinçli yapılır: sürümü burada değiştir, push'la — CI + smoke testi
+# + gözetmenin canary'si zaten korur.
+playwright==1.61.0
+PyYAML==6.0.3
