@@ -11,3 +11,5 @@ guncelleyici_state.json
 guncelleyici_state.json.tmp
 *.log
 __pycache__/
+venv/
+.DS_Store
