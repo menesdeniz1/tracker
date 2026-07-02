@@ -42,7 +42,7 @@ def _epoch_ms(iso: str) -> int | None:
 def _read_history(csv_path: Path) -> list[dict]:
     """CSV'yi okur. Hem v2 (zaman;urun;fiyat;stok;kaynak) hem v3
     (zaman;urun;site;fiyat;stok;kaynak) düzenini tanır."""
-    rows = []
+    rows: list[dict] = []
     with open(csv_path, encoding="utf-8") as f:
         rd = csv.reader(f, delimiter=";")
         header = next(rd, None)
@@ -92,11 +92,14 @@ def _thresholds(products_yaml: Path) -> dict[str, float]:
 
 
 def generate(csv_path: Path = HISTORY_CSV, out_path: Path = OUT_HTML,
-             products_yaml: Path = PRODUCTS_YAML) -> Path:
+             products_yaml: Path = PRODUCTS_YAML, urun: str | None = None) -> Path:
+    """urun verilirse yalnız o ürünün grafiği çizilir (kart → 📈 butonu)."""
     if not csv_path.exists():
         raise FileNotFoundError(
             f"{csv_path} yok — bot en az bir fiyat okumadan grafik çıkmaz.")
     rows = _read_history(csv_path)
+    if urun is not None:
+        rows = [r for r in rows if r["urun"] == urun]
     if not rows:
         raise ValueError(f"{csv_path} içinde çizilecek fiyat kaydı yok.")
     hedefler = _thresholds(products_yaml)
@@ -118,7 +121,7 @@ def generate(csv_path: Path = HISTORY_CSV, out_path: Path = OUT_HTML,
 
     data = []
     for urun in urun_sirasi:
-        siteler = [{"site": s, "slot": site_slot[s], "points": pts}
+        siteler: list[dict] = [{"site": s, "slot": site_slot[s], "points": pts}
                    for s, pts in seriler[urun].items()]
         tablo = sorted(
             ([r["zaman"], r["site"], r["fiyat"]] for r in rows if r["urun"] == urun),

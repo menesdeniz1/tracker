@@ -4,7 +4,7 @@ ondalık ayraç kombinasyonlarının tamamı burada sabitlenir; bir refactor bu
 kuralları bozarsa CI anında yakalar."""
 import pytest
 
-from takip_botu_pro import parse_try_amount, tl, pct
+from takipbotu.fiyat import parse_try_amount, pct, tl
 
 
 @pytest.mark.parametrize("girdi, beklenen", [

@@ -1,0 +1,16 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# Varsayılanlara ek: I (import sırası), B (bugbear — yaygın hata kalıpları)
+extend-select = ["I", "B"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["takipbotu", "takip_botu_pro.py", "grafik.py", "guncelleyici.py"]
+ignore_missing_imports = true
+check_untyped_defs = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

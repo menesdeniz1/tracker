@@ -29,6 +29,12 @@ jobs:
       - name: Bağımlılıklar
         run: pip install -r requirements.txt -r requirements-dev.txt
 
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Tip kontrolü (mypy)
+        run: mypy
+
       - name: Birim testleri
         run: python -m pytest -q
 

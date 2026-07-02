@@ -3,11 +3,9 @@
 seçimi, 30-gün-dibi hesapları, etiket yardımcıları."""
 from datetime import date, timedelta
 
-from takip_botu_pro import (
-    alarm_gerekli, baslik_temizle, dip30_oncesi, en_iyi_kaynak, etiket_uret,
-    fiyat_suphali, gunluk_min_guncelle, product_key, product_urls,
-    yedi_gun_degisim, _tekil_etiket,
-)
+from takipbotu.karar import alarm_gerekli, en_iyi_kaynak, fiyat_suphali
+from takipbotu.konfig import _tekil_etiket, baslik_temizle, etiket_uret, product_key, product_urls
+from takipbotu.veri import dip30_oncesi, gunluk_min_guncelle, yedi_gun_degisim
 
 
 def _sonuc(**kw):

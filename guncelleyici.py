@@ -283,12 +283,12 @@ def guncelle(dal, durum):
 
 def bot_baslat():
     log(f"Bot başlatılıyor: {' '.join(BOT_CMD)}")
-    kwargs = {}
     if os.name == "nt":
-        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
-    else:
-        kwargs["start_new_session"] = True   # terminaldeki Ctrl+C botu ezmesin
-    return subprocess.Popen(BOT_CMD, cwd=str(BASE), **kwargs)
+        return subprocess.Popen(BOT_CMD, cwd=str(BASE),
+                                creationflags=getattr(subprocess,
+                                                      "CREATE_NEW_PROCESS_GROUP", 0))
+    # start_new_session: terminaldeki Ctrl+C botu ezmesin
+    return subprocess.Popen(BOT_CMD, cwd=str(BASE), start_new_session=True)
 
 
 def bot_durdur(cocuk):

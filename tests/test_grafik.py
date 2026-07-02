@@ -1,8 +1,9 @@
 # -*- coding: utf-8 -*-
 """Grafik modülü: CSV okuma (v2/v3 düzenleri + bozuk satır toleransı) ve
 hedef fiyat birleşimi (products.yaml + telegram_urunler.yaml overlay)."""
-import grafik
 import yaml
+
+import grafik
 
 
 def test_read_history_v3_ve_bozuk_satirlar(tmp_path):
