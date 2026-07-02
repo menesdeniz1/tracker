@@ -43,26 +43,35 @@ python takip_botu_pro.py grafik   # fiyat_grafigi.html üret (veya: python grafi
 Fiyat `—` görünüyorsa veya KAYNAK sütunu `regex` diyorsa `sites.yaml`'a o site için
 doğru `price_selector` yaz (sayfada sağ tık → İncele → fiyat elementinin class'ı).
 
-## Telegram komutları (bot çalışırken)
+## Telegram'dan yönetim — kartlar ve butonlar (numara ezberi yok)
 
-| Komut | Ne yapar |
-|---|---|
-| **ürün linki gönder** | En kolay yol: fiyatı okur, hedefi butonla seçtirir, izlemeye alır |
-| `/durum` | Son fiyatlar + hedefler + 7 günlük trend (↓%4,2/7g) + kaynak site |
-| `/liste` | İzlenen ürünler, numaralı (sil/hedef için numara buradan) |
-| `/ekle <link> [hedefTL] [etiket]` | Hedefsiz verirsen butonlu akış açılır |
-| `/sil <no>` | Ürünü izlemeden çıkar |
-| `/hedef <no> <fiyatTL>` | Hedef fiyatı değiştir |
-| `/akakce <no>` | Ürünü adıyla Akakçe'de arar, butonla onaylarsın → Akakçe birincil kaynak olur |
-| `/grafik` | Grafik: PNG (hızlı bakış) + HTML (etkileşimli) gönderir |
-| `/csv` | Ham fiyat geçmişini gönderir |
-| `/yardim` | Komut listesi |
+Üç giriş yolu var, hepsi butonlara çıkar:
 
+- **ürün linki gönder** → fiyatı okur, hedefi butonla seçtirir, izleme başlar,
+  ardından "Akakçe'ye de bağlayayım mı?" diye kendisi önerir.
+- **`/durum`** → özet başlık (`📊 30 ürün · ✅ 24 · ⚠️ 4 · ⏸ 2`) + ürün başına
+  tıklanabilir satır. **Sorunlular en üstte**, hedefe yakınlar hemen altında.
+  Satıra dokun → **ürün kartı** açılır: fiyat, hedef (+ hedefe % kalan),
+  7g trend, 30g dip, mini grafik (▁▂▄▆█) ve butonlar:
+  🎯 hedef değiştir (%3/%5/%10 altı ya da elle) · 🔍 Akakçe'ye bağla ·
+  ⏸ duraklat/devam · ➕ kaynak ekle · 📈 sadece bu ürünün grafiği ·
+  🗑 sil (onaylı + **geri al**'lı).
+- **ürün adı yaz** (örn. `kingston`) → kartı doğrudan açılır; birden çok
+  eşleşme varsa kısa seçim listesi gelir.
+
+Diğer komutlar: `/sorunlu` (sadece okunamayan/engelliler — her birinde
+Akakçe'ye bağlama kısayolu), `/grafik`, `/csv`, `/yardim`. Alarm mesajlarının
+altında da hızlı aksiyonlar vardır: **✅ Aldım** (izlemeyi bırakır) ·
+**🔕 1 hafta sustur** · **🎯 hedefi değiştir**. Eski numaralı komutlar
+(`/sil 3`, `/hedef 3 12750`, `/akakce 3`) geriye uyum için hâlâ çalışır.
+
+Kart gezinmesi mesajı yerinde düzenler — sohbet mesaj çöplüğüne dönmez.
 Sadece `telegram_chat_id`'deki sohbetten gelen komutlar işlenir; yabancılar yok sayılır.
 
-Telegram'dan yapılan ekleme/silme/hedef değişiklikleri `telegram_urunler.yaml`'a
-yazılır — senin elle düzenlediğin `products.yaml` hiç bozulmaz; açılışta ikisi
-birleştirilir. Bot yeniden başlatma gerektirmez, izleyiciler canlı güncellenir.
+Telegram'dan yapılan ekleme/silme/hedef/duraklatma değişiklikleri
+`telegram_urunler.yaml`'a yazılır — senin elle düzenlediğin `products.yaml`
+hiç bozulmaz; açılışta ikisi birleştirilir. Bot yeniden başlatma gerektirmez,
+izleyiciler canlı güncellenir.
 
 ## 30 günün en düşüğü sinyali
 
@@ -130,10 +139,11 @@ loglar.
 ÖNEMLİ: Bot ürünleri **kendiliğinden Akakçe'de aramaz** — sadece listedeki
 linklere bakar. Bir ürünü Akakçe'ye bağlamanın iki yolu var:
 
-1. **Telefondan (kolay):** `/akakce <no>` — bot ürün adıyla Akakçe'de arar,
-   bulduğu ilk 3 ürün sayfasını buton yapar, doğrusuna tıklarsın. O andan
-   itibaren Akakçe o ürünün **birincil** kaynağı olur (tüm satıcıların en ucuzu),
-   mevcut mağaza linki yedek kaynak olarak kalır.
+1. **Telefondan (kolay):** ürün kartındaki **🔍 Akakçe'ye bağla** butonu —
+   bot ürün adıyla Akakçe'de arar, bulduğu ilk 3 ürün sayfasını buton yapar,
+   doğrusuna tıklarsın. O andan itibaren Akakçe o ürünün **birincil** kaynağı
+   olur (tüm satıcıların en ucuzu), mevcut mağaza linki yedek kaynak kalır.
+   (Yeni ürün eklerken bot bunu kendisi de önerir.)
 2. **Elle:** ürüne `url` yerine `urls` listesi ver, ilk sıraya Akakçe linkini koy.
 
 Bot her turda ürünün tüm kaynaklarını kontrol eder ve **en ucuzunu** bildirir;
@@ -152,17 +162,20 @@ Akakçe'de en ucuz satıcının adı da bildirime eklenir.
 
 | Dosya | Ne işe yarar |
 |---|---|
+| `takipbotu/` | Bot kodu (fiyat, konfig, veri, tarayici, karar, bildirim, izleyici, arayuz) |
+| `takip_botu_pro.py` | İnce giriş noktası — gözetmen ve smoke burayı çağırır |
 | `products.yaml` | Ürün listesi + genel ayarlar (Telegram, eşzamanlılık, heartbeat...) |
-| `telegram_urunler.yaml` | /ekle /sil /hedef değişiklikleri (bot yazar, otomatik oluşur) |
+| `telegram_urunler.yaml` | Telegram değişiklikleri: ekle/sil/hedef/kaynak/duraklat (bot yazar) |
 | `sites.yaml` | Siteye özel CSS seçicileri — site okumuyorsa burayı düzelt |
-| `grafik.py` | `fiyat_gecmisi.csv` → `fiyat_grafigi.html` (koyu/açık tema, ürün başına grafik) |
+| `veri.db` | Fiyat geçmişi (SQLite, WAL) — eski CSV ilk açılışta içeri aktarılır |
+| `grafik.py` | `veri.db` → `fiyat_grafigi.html` (koyu/açık tema, ürün başına grafik) |
 | `guncelleyici.py` | Gözetmen: watchdog + git'ten otomatik güncelleme + bozuk push geri alma |
 | `com.takip-botu.plist` | macOS launchd şablonu (gözetmeni ayakta tutar) |
 | `calistir.bat` | Windows başlatıcı (gözetmeni ayakta tutar) |
 | `takip-botu.service` | Linux/RaspberryPi systemd şablonu (gözetmeni ayakta tutar) |
 | `guncelleyici_state.json` | Gözetmen durumu: son iyi sürüm + bozuk commit (otomatik) |
-| `tests/` | pytest birim testleri (parser, karar mantığı, göç, grafik) |
-| `.github/workflows/ci.yml` | CI: her push'ta testler + smoke — hata push anında görünür |
+| `tests/` | pytest birim testleri (parser, karar, göç, veri, grafik, arayüz) |
+| `.github/workflows/ci.yml` | CI: ruff + mypy + testler + smoke — hata push anında görünür |
 
 ## Testler, CI ve disk disiplini
 

@@ -3,6 +3,11 @@
 state.json
 state.json.tmp
 fiyat_gecmisi.csv
+fiyat_gecmisi.csv.eski
+fiyat_gecmisi_export.csv
+veri.db
+veri.db-wal
+veri.db-shm
 fiyat_grafigi.html
 fiyat_grafigi.png
 telegram_urunler.yaml

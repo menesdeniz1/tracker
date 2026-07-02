@@ -18,7 +18,8 @@ from pathlib import Path
 import yaml
 
 BASE_DIR = Path(__file__).resolve().parent
-HISTORY_CSV = BASE_DIR / "fiyat_gecmisi.csv"
+HISTORY_CSV = BASE_DIR / "fiyat_gecmisi.csv"     # eski biçim (yedek okuma yolu)
+VERI_DB = BASE_DIR / "veri.db"                   # asıl kaynak (bot SQLite'a yazar)
 PRODUCTS_YAML = BASE_DIR / "products.yaml"
 TELEGRAM_URUNLER = BASE_DIR / "telegram_urunler.yaml"
 OUT_HTML = BASE_DIR / "fiyat_grafigi.html"
@@ -67,6 +68,25 @@ def _read_history(csv_path: Path) -> list[dict]:
     return rows
 
 
+def _read_history_db(db_path: Path) -> list[dict]:
+    """veri.db'den okumalar (botun asıl geçmiş kaynağı)."""
+    import sqlite3
+    rows: list[dict] = []
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    try:
+        for ts, urun, site, fiyat in conn.execute(
+                "SELECT ts, urun, site, fiyat FROM okumalar "
+                "WHERE fiyat IS NOT NULL ORDER BY ts"):
+            t = _epoch_ms(ts)
+            if t is None:
+                continue
+            rows.append({"t": t, "zaman": ts, "urun": urun,
+                         "site": site, "fiyat": fiyat})
+    finally:
+        conn.close()
+    return rows
+
+
 def _thresholds(products_yaml: Path) -> dict[str, float]:
     """Hedef fiyatlar: products.yaml + telegram_urunler.yaml birleşimi.
     Telegram'dan /ekle ile gelen ürünler ve /hedef değişiklikleri de
@@ -92,16 +112,22 @@ def _thresholds(products_yaml: Path) -> dict[str, float]:
 
 
 def generate(csv_path: Path = HISTORY_CSV, out_path: Path = OUT_HTML,
-             products_yaml: Path = PRODUCTS_YAML, urun: str | None = None) -> Path:
-    """urun verilirse yalnız o ürünün grafiği çizilir (kart → 📈 butonu)."""
-    if not csv_path.exists():
+             products_yaml: Path = PRODUCTS_YAML, urun: str | None = None,
+             db_path: Path = VERI_DB) -> Path:
+    """urun verilirse yalnız o ürünün grafiği çizilir (kart → 📈 butonu).
+    Önce veri.db okunur; yoksa eski CSV'ye düşülür (bağımsız kullanım)."""
+    if db_path.exists():
+        rows = _read_history_db(db_path)
+    elif csv_path.exists():
+        rows = _read_history(csv_path)
+    else:
         raise FileNotFoundError(
-            f"{csv_path} yok — bot en az bir fiyat okumadan grafik çıkmaz.")
-    rows = _read_history(csv_path)
+            "veri.db / fiyat_gecmisi.csv yok — bot en az bir fiyat okumadan "
+            "grafik çıkmaz.")
     if urun is not None:
         rows = [r for r in rows if r["urun"] == urun]
     if not rows:
-        raise ValueError(f"{csv_path} içinde çizilecek fiyat kaydı yok.")
+        raise ValueError("Çizilecek fiyat kaydı yok.")
     hedefler = _thresholds(products_yaml)
 
     # Site → renk slotu: TÜM veri üzerinde ilk görülme sırası (kalıcı eşleme)

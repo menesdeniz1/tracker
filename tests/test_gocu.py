@@ -1,21 +1,19 @@
 # -*- coding: utf-8 -*-
-"""Etiket değişikliğinde geçmiş göçü: state + CSV + Telegram overlay'i URL
+"""Etiket değişikliğinde geçmiş göçü: state + veri.db + Telegram overlay URL
 parmak iziyle yeni etikete taşınmalı; ilgisiz kayıtlara dokunulmamalı."""
-import csv
+import asyncio
 
 from takipbotu import konfig, veri
 
 
 def _kur(tmp_path, monkeypatch):
     """Geçici dosyalarla göç ortamı hazırlar."""
+    monkeypatch.setattr(veri, "VERI_DB", tmp_path / "veri.db")
     monkeypatch.setattr(veri, "HISTORY_CSV", tmp_path / "gecmis.csv")
     monkeypatch.setattr(konfig, "TELEGRAM_URUNLER", tmp_path / "tg.yaml")
 
-    with open(veri.HISTORY_CSV, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f, delimiter=";")
-        w.writerow(["zaman", "urun", "site", "fiyat", "stok", "kaynak"])
-        w.writerow(["2026-07-01T10:00:00", "Eski Ad", "amazon.com.tr", "100.00", "", "seçici"])
-        w.writerow(["2026-07-01T11:00:00", "Baska Urun", "n11.com", "50.00", "", "json-ld"])
+    asyncio.run(veri.append_history("Eski Ad", "amazon.com.tr", 100.0, None, "seçici"))
+    asyncio.run(veri.append_history("Baska Urun", "n11.com", 50.0, None, "json-ld"))
 
     konfig.save_yaml_atomic(konfig.TELEGRAM_URUNLER, {
         "eklenen": [], "kaldirilan": [],
@@ -52,9 +50,9 @@ def test_goc_tasima(tmp_path, monkeypatch):
     assert "URLsuz Sahipsiz" in state.data
     assert "Yepyeni Urun" not in state.data
 
-    # CSV etiketi güncellendi, diğer satır korundu
-    rows = list(csv.reader(open(veri.HISTORY_CSV, encoding="utf-8"), delimiter=";"))
-    assert rows[1][1] == "Yeni Ad" and rows[2][1] == "Baska Urun"
+    # veri.db'deki geçmiş yeni ada taşındı, diğer ürün korundu
+    assert veri.gecmis_oku("Yeni Ad") and not veri.gecmis_oku("Eski Ad")
+    assert veri.gecmis_oku("Baska Urun")
 
     # Telegram overlay anahtarları taşındı
     tg = konfig.load_yaml(konfig.TELEGRAM_URUNLER)

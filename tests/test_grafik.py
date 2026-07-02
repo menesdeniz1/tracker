@@ -50,6 +50,17 @@ def test_thresholds_overlay_birlesimi(tmp_path):
     assert "Hedefsiz" not in h
 
 
+def test_read_history_db(tmp_path, monkeypatch):
+    import asyncio
+
+    from takipbotu import veri
+    monkeypatch.setattr(veri, "VERI_DB", tmp_path / "veri.db")
+    monkeypatch.setattr(veri, "HISTORY_CSV", tmp_path / "yok.csv")
+    asyncio.run(veri.append_history("U", "s", 5.0, None, "meta"))
+    rows = grafik._read_history_db(tmp_path / "veri.db")
+    assert rows and rows[0]["fiyat"] == 5.0 and "t" in rows[0]
+
+
 def test_thresholds_overlay_dosyasi_yoksa(tmp_path):
     products = tmp_path / "products.yaml"
     products.write_text(yaml.safe_dump({"products": [

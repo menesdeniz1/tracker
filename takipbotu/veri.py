@@ -1,17 +1,125 @@
 # -*- coding: utf-8 -*-
 """Kalıcı veri katmanı: state.json (bildirim durumu + günlük minimumlar),
-fiyat geçmişi ve etiket göçü."""
+fiyat geçmişi (SQLite) ve etiket göçü.
+
+Fiyat geçmişi veri.db'de tutulur (WAL modu — tek yazarlı, çökmeye dayanıklı).
+Eski fiyat_gecmisi.csv ilk açılışta bir kez içeri aktarılır ve .eski uzantısıyla
+arşivlenir; /csv komutu DB'den dışa aktarır. CSV'nin sınırsız büyüme ve tam
+tarama sorunları böylece biter."""
 import asyncio
 import csv
 import json
 import logging
 import os
+import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
 from . import konfig
 
 HISTORY_CSV = konfig.HISTORY_CSV
+VERI_DB = konfig.VERI_DB
+
+_baglantilar: dict[Path, sqlite3.Connection] = {}
+
+
+def _db() -> sqlite3.Connection:
+    """veri.db bağlantısı (yol başına tekil). İlk açılışta şema kurulur ve
+    varsa eski CSV bir kez içeri aktarılır."""
+    yol = VERI_DB
+    conn = _baglantilar.get(yol)
+    if conn is not None:
+        return conn
+    conn = sqlite3.connect(yol)
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("""CREATE TABLE IF NOT EXISTS okumalar(
+        id INTEGER PRIMARY KEY,
+        ts TEXT NOT NULL,
+        urun TEXT NOT NULL,
+        site TEXT NOT NULL,
+        fiyat REAL,
+        stok INTEGER,
+        kaynak TEXT)""")
+    conn.execute("CREATE INDEX IF NOT EXISTS ix_okumalar_urun_ts "
+                 "ON okumalar(urun, ts)")
+    conn.commit()
+    _baglantilar[yol] = conn
+    _csv_ice_aktar(conn)
+    return conn
+
+
+def _csv_ice_aktar(conn: sqlite3.Connection) -> None:
+    """Tek seferlik göç: DB boşsa ve eski CSV varsa satırları içeri alır,
+    CSV'yi .eski olarak arşivler (tek doğruluk kaynağı DB kalsın)."""
+    if conn.execute("SELECT COUNT(*) FROM okumalar").fetchone()[0]:
+        return
+    if not HISTORY_CSV.exists():
+        return
+    aktarilan = 0
+    with open(HISTORY_CSV, encoding="utf-8") as f:
+        rd = csv.reader(f, delimiter=";")
+        header = next(rd, None) or []
+        v3 = "site" in header
+        for r in rd:
+            try:
+                if v3:
+                    ts, urun, site, fiyat, stok, kaynak = (r + [""] * 6)[:6]
+                else:
+                    ts, urun, fiyat, stok, kaynak = (r + [""] * 5)[:5]
+                    site = "?"
+                if not fiyat:
+                    continue
+                conn.execute(
+                    "INSERT INTO okumalar(ts, urun, site, fiyat, stok, kaynak) "
+                    "VALUES(?,?,?,?,?,?)",
+                    (ts, urun, site, float(fiyat),
+                     int(stok) if stok in ("0", "1") else None, kaynak))
+                aktarilan += 1
+            except (IndexError, ValueError):
+                continue
+    conn.commit()
+    if aktarilan:
+        arsiv = HISTORY_CSV.with_suffix(".csv.eski")
+        try:
+            os.replace(HISTORY_CSV, arsiv)
+        except OSError:
+            pass
+        logging.info(f"Fiyat geçmişi SQLite'a taşındı: {aktarilan} kayıt "
+                     f"(eski dosya: {arsiv.name})")
+
+
+def gecmis_oku(urun: str | None = None) -> list[dict]:
+    """Grafik için okuma listesi (fiyatı olanlar, zaman sıralı)."""
+    q = ("SELECT ts, urun, site, fiyat FROM okumalar "
+         "WHERE fiyat IS NOT NULL")
+    args: tuple = ()
+    if urun is not None:
+        q += " AND urun = ?"
+        args = (urun,)
+    q += " ORDER BY ts"
+    return [{"zaman": ts, "urun": u, "site": s, "fiyat": f}
+            for ts, u, s, f in _db().execute(q, args).fetchall()]
+
+
+def baslat() -> None:
+    """DB'yi açar (şema + gerekiyorsa CSV göçü). Bot açılışında çağrılır ki
+    göç, ilk fiyat okumasını beklemeden yapılsın."""
+    _db()
+
+
+def csv_disari_aktar(hedef: Path) -> int:
+    """/csv komutu: DB'deki tüm geçmişi CSV'ye yazar, satır sayısını döndürür."""
+    rows = _db().execute(
+        "SELECT ts, urun, site, fiyat, stok, kaynak FROM okumalar ORDER BY ts"
+    ).fetchall()
+    with open(hedef, "w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["zaman", "urun", "site", "fiyat", "stok", "kaynak"])
+        for ts, urun, site, fiyat, stok, kaynak in rows:
+            w.writerow([ts, urun, site,
+                        f"{fiyat:.2f}" if fiyat is not None else "",
+                        "" if stok is None else str(stok), kaynak])
+    return len(rows)
 
 
 class State:
@@ -44,19 +152,13 @@ async def append_history(label: str, site: str, price: float | None,
                          in_stock, source: str) -> None:
     from datetime import datetime
     async with HISTORY_LOCK:
-        yeni = not HISTORY_CSV.exists()
-        with open(HISTORY_CSV, "a", newline="", encoding="utf-8") as f:
-            w = csv.writer(f, delimiter=";")
-            if yeni:
-                w.writerow(["zaman", "urun", "site", "fiyat", "stok", "kaynak"])
-            w.writerow([
-                datetime.now().isoformat(timespec="seconds"),
-                label,
-                site,
-                f"{price:.2f}" if price is not None else "",
-                {True: "1", False: "0"}.get(in_stock, ""),
-                source,
-            ])
+        conn = _db()
+        conn.execute(
+            "INSERT INTO okumalar(ts, urun, site, fiyat, stok, kaynak) "
+            "VALUES(?,?,?,?,?,?)",
+            (datetime.now().isoformat(timespec="seconds"), label, site, price,
+             {True: 1, False: 0}.get(in_stock), source))
+        conn.commit()
 
 
 # --- Günlük minimum takibi: 30-gün-dibi sinyali + 7 günlük trend buradan beslenir ---
@@ -106,23 +208,15 @@ def yedi_gun_degisim(st: dict) -> float | None:
 
 # ===================== ETİKET GÖÇÜ =====================
 
-def csv_etiket_degistir(eski: str, yeni: str) -> None:
-    """fiyat_gecmisi.csv'deki ürün adını günceller (atomik: tmp + replace)."""
-    if not HISTORY_CSV.exists():
-        return
-    with open(HISTORY_CSV, encoding="utf-8", newline="") as f:
-        rows = list(csv.reader(f, delimiter=";"))
-    for r in rows:
-        if len(r) >= 2 and r[1] == eski:
-            r[1] = yeni
-    tmp = HISTORY_CSV.with_suffix(".csv.tmp")
-    with open(tmp, "w", encoding="utf-8", newline="") as f:
-        csv.writer(f, delimiter=";").writerows(rows)
-    os.replace(tmp, HISTORY_CSV)
+def gecmis_etiket_degistir(eski: str, yeni: str) -> None:
+    """veri.db'deki ürün adını günceller (grafik geçmişi kopmasın)."""
+    conn = _db()
+    conn.execute("UPDATE okumalar SET urun = ? WHERE urun = ?", (yeni, eski))
+    conn.commit()
 
 
 def etiket_gocu(state: State, products: list[dict]) -> bool:
-    """Etiket değişse de geçmiş kaybolmasın. state/CSV/hedefler etikete göre
+    """Etiket değişse de geçmiş kaybolmasın. state/geçmiş/hedefler etikete göre
     anahtarlıdır (çoklu kaynakta URL ürünü temsil etmez); ürünü yeniden
     adlandırmak cooldown'u, günlük minimumları ve grafik geçmişini sıfırlıyordu.
     Eşleştirme URL parmak iziyle: izleyici her turda ürünün URL'lerini state'e
@@ -140,7 +234,7 @@ def etiket_gocu(state: State, products: list[dict]) -> bool:
             if yeni in state.data or not eski_urls & set(konfig.product_urls(p)):
                 continue
             state.data[yeni] = state.data.pop(eski)
-            csv_etiket_degistir(eski, yeni)
+            gecmis_etiket_degistir(eski, yeni)
             d = konfig._tg_dosya()
             degisti = False
             for alan in ("hedefler", "ek_kaynaklar"):
@@ -150,7 +244,7 @@ def etiket_gocu(state: State, products: list[dict]) -> bool:
             if degisti:
                 konfig.save_yaml_atomic(konfig.TELEGRAM_URUNLER, d)
             logging.info(f"Etiket değişikliği algılandı: '{eski}' → '{yeni}' — "
-                         "geçmiş taşındı (state + CSV + hedef/ek-kaynak).")
+                         "geçmiş taşındı (state + veri.db + hedef/ek-kaynak).")
             tasindi = True
             break
     return tasindi

@@ -571,8 +571,10 @@ async def _komut_isle(text: str, notifier: Notifier, shared: dict, state: State,
         await _akakce_akisi(manager, notifier, shared, p)
 
     elif cmd == "/csv":
-        if konfig.HISTORY_CSV.exists():
-            await notifier.send_document(konfig.HISTORY_CSV, "Ham fiyat geçmişi")
+        disari = konfig.BASE_DIR / "fiyat_gecmisi_export.csv"
+        n = veri.csv_disari_aktar(disari)
+        if n:
+            await notifier.send_document(disari, f"Ham fiyat geçmişi ({n} kayıt)")
         else:
             await notifier.send("Henüz fiyat kaydı yok.")
 

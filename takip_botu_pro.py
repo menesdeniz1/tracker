@@ -66,6 +66,7 @@ async def main() -> None:
         logging.error("products.yaml içinde aktif ürün yok.")
         return
     sites = _sites()
+    veri.baslat()   # veri.db şeması + gerekiyorsa eski CSV'nin tek seferlik göçü
     state = veri.State(konfig.STATE_FILE)
     # Etiket değiştirilmişse geçmişi yeni ada taşı (URL parmak iziyle eşleşir)
     if veri.etiket_gocu(state, products):
