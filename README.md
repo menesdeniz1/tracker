@@ -1,21 +1,24 @@
-# Takip Botu PRO v4 — TR E-Ticaret Fiyat & Stok Takibi (Telegram + Akakçe)
+# Takip Botu PRO — TR E-Ticaret Fiyat & Stok Takibi (Telegram + Akakçe)
 
 Amazon.tr, Hepsiburada, N11, Trendyol, Akakçe, Tebilon vb. sitelerden PC parçası
 fiyat/stok takibi yapar, hedef tutunca **Telegram'a** bildirim atar. Aynı ürünü
 birden çok kaynaktan (Akakçe birincil) izleyip **en ucuzunu** bildirir.
 Ürünler **Telegram'dan yönetilir** (/ekle /sil /hedef), fiyat hedefe inmese bile
 **son 30 günün dibini** haber verir, haftada bir **grafik raporu** gönderir.
+`git push` ile uzaktan güncellenir; bozuk push otomatik geri alınır (aşağıda).
 
 ## Hızlı başlangıç (minimum girdi)
 
-**Windows:** `kur.bat`'a çift tıkla — paketleri kurar, sihirbaz Telegram'ı
-soru-cevapla bağlar (token yapıştır + botuna `/start` yaz, o kadar), istersen
-botu hemen başlatır. Hiçbir YAML dosyası düzenlemen gerekmez.
+**Windows:** repo'yu klonla, `kur.bat`'a çift tıkla — paketleri kurar, sihirbaz
+Telegram'ı soru-cevapla bağlar (token yapıştır + botuna `/start` yaz, o kadar),
+istersen botu hemen başlatır. Hiçbir YAML dosyası düzenlemen gerekmez.
 
 **Linux/Mac:**
 ```bash
-pip install -r requirements.txt && playwright install chromium
-python takip_botu_pro.py kur     # sihirbaz — token yapıştır + botuna /start yaz
+git clone https://github.com/menesdeniz1/tracker.git && cd tracker
+python3 -m venv venv && venv/bin/pip install -r requirements.txt
+venv/bin/playwright install chromium
+venv/bin/python takip_botu_pro.py kur   # sihirbaz — token yapıştır + botuna /start yaz
 ```
 
 Ondan sonrası telefondan: **bota ürün linkini gönder** → fiyatı okur, adı

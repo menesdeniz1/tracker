@@ -21,7 +21,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=pi
-WorkingDirectory=/home/pi/bots/takip-botu-pro
+WorkingDirectory=/home/pi/tracker
 ExecStart=/usr/bin/python3 guncelleyici.py
 Restart=always
 RestartSec=15
