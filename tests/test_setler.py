@@ -58,14 +58,32 @@ def test_acil_hedef_yukleme(tmp_path, monkeypatch):
 
 # ---------- veri: set serisi + fiyat bağlamı ----------
 
-def test_set_toplam_serisi_ortak_gun_kurali(tmp_path, monkeypatch):
+def test_set_toplam_serisi_ortak_gun(tmp_path, monkeypatch):
     _ortam(tmp_path, monkeypatch)
     asyncio.run(veri.append_history("CPU", "s", 100.0, None, "seçici"))
     asyncio.run(veri.append_history("GPU", "s", 200.0, None, "seçici"))
     seri = veri.set_toplam_serisi(["CPU", "GPU"])
     assert len(seri) == 1 and seri[0][1] == 300.0
-    # tek üyenin verisi olan gün toplamda YOK (sahte sıçrama koruması)
+    # bir üyenin HİÇ verisi yoksa grafik çıkmaz
     assert veri.set_toplam_serisi(["CPU", "Hayalet"]) == []
+
+
+def test_set_toplam_serisi_gec_katilan_uye_geri_doldurulur(tmp_path, monkeypatch):
+    """Sonradan eklenen üye, katılmadan önceki günlerde ilk fiyatıyla sayılır —
+    ürün eklemek set grafik geçmişini silmez, çizgi sürekli olur."""
+    _ortam(tmp_path, monkeypatch)
+    conn = veri._db()
+    # CPU iki gün, GPU sadece bugün (geç katıldı)
+    dun = (date.today() - timedelta(days=1)).isoformat()
+    conn.execute("INSERT INTO okumalar(ts,urun,site,fiyat,stok,kaynak) "
+                 "VALUES(?,?,?,?,NULL,'s')", (f"{dun}T10:00:00", "CPU", "s", 100.0))
+    conn.commit()
+    asyncio.run(veri.append_history("CPU", "s", 110.0, None, "s"))
+    asyncio.run(veri.append_history("GPU", "s", 200.0, None, "s"))
+    seri = veri.set_toplam_serisi(["CPU", "GPU"])
+    assert len(seri) == 2                      # dün + bugün (tek noktaya düşmez)
+    assert seri[0] == (dun, 300.0)             # dün: 100 + GPU'nun ilk fiyatı 200
+    assert seri[1][1] == 310.0                 # bugün: 110 + 200
 
 
 def test_fiyat_baglami_ve_sinyal(tmp_path, monkeypatch):
@@ -185,10 +203,16 @@ def test_set_gorunumleri(tmp_path, monkeypatch):
 
     products = konfig.load_products()
     metin, rows = arayuz.set_gorunumu("PC", products, state)
-    assert "TOPLAM: 240,00 TL" in metin and "HEDEFTE 🔥" in metin
+    assert "TOPLAM: 240,00 TL" in metin
     datalar = [b.get("callback_data", "") for r in rows for b in r]
     sid = arayuz.kisa_id("PC")
     assert f"sethedef|{sid}" in datalar and f"setgrf|{sid}" in datalar
+    # üyeler pahalıdan ucuza sıralı: ilk ürün satırı GPU (140) olmalı
+    urun_satirlari = [r for r in rows
+                      if r[0].get("callback_data", "").startswith("kart|")]
+    assert urun_satirlari[0][0]["text"].startswith("GPU")
+    # alt bar dolu + HEDEFTE (240<=250)
+    assert "██████████" in metin and "HEDEFTE" in metin.split("\n")[-1]
 
     p = products[0]
     metin, rows = arayuz.set_secim_gorunumu(p)

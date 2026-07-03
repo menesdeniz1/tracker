@@ -102,19 +102,42 @@ def gecmis_oku(urun: str | None = None) -> list[dict]:
 
 
 def set_toplam_serisi(keys: list[str], gun: int = 60) -> list[tuple[str, float]]:
-    """Set toplam grafiği için günlük seri: her gün, TÜM üyelerin o günkü
-    minimum fiyatları toplamı. Bir üyenin verisi olmayan gün atlanır ki
-    'ürün eklendi/okunamadı' günleri toplamda sahte sıçrama yapmasın."""
+    """Set toplam grafiği için günlük seri. Her üyenin GÜN SONU fiyatını
+    (o günün son okuması) alır ve İLERİ DOLDURUR: bir üye o gün okunmadıysa
+    en son bilinen fiyatı taşınır. Böylece:
+      • grafik tek noktaya düşmez (üyeler farklı zamanlarda okunsa bile sürekli),
+      • sağ uç canlı toplamla tutar (gün sonu ≈ son okuma),
+      • 'ürün eklendi' günü sahte sıçrama yapmaz (tüm üyeler bilinene kadar
+        toplam yazılmaz).
+    Toplam, ancak tüm üyeler için en az bir fiyat bilindikten sonra başlar."""
     if not keys:
         return []
-    q = ("SELECT date(ts) g, urun, MIN(fiyat) FROM okumalar "
+    # gün + ürün başına SON okuma (ORDER BY ts → dict'te son yazan kalır)
+    q = ("SELECT date(ts) g, urun, fiyat FROM okumalar "
          f"WHERE fiyat IS NOT NULL AND urun IN ({','.join('?' * len(keys))}) "
-         "AND ts >= date('now', ?) GROUP BY g, urun")
-    gunluk: dict[str, dict[str, float]] = {}
+         "AND ts >= date('now', ?) ORDER BY ts")
+    uye_gun: dict[str, dict[str, float]] = {k: {} for k in keys}
     for g, urun, f in _db().execute(q, (*keys, f"-{gun} day")).fetchall():
-        gunluk.setdefault(g, {})[urun] = f
-    return [(g, sum(v.values())) for g, v in sorted(gunluk.items())
-            if len(v) == len(keys)]
+        if urun in uye_gun:
+            uye_gun[urun][g] = f
+    tum_gunler = sorted({g for m in uye_gun.values() for g in m})
+    # Her üyeyi EN ERKEN fiyatıyla başlat (geri doldurma): sonradan sete eklenen
+    # üye, katılmadan önceki günlerde ilk bilinen fiyatıyla sayılır. Böylece bir
+    # ürün eklemek setin tüm grafik geçmişini silmez ve çizgi süreklidir; sıçrama
+    # olmaz çünkü katılımdan önceki dönem sabit tutulur.
+    son: dict[str, float] = {}
+    for k in keys:
+        if uye_gun[k]:
+            son[k] = uye_gun[k][min(uye_gun[k])]
+    if len(son) != len(keys):           # bir üyenin hiç fiyatı yoksa grafik çıkmaz
+        return []
+    out: list[tuple[str, float]] = []
+    for g in tum_gunler:
+        for k in keys:
+            if g in uye_gun[k]:         # o gün okunduysa güncelle, yoksa taşı
+                son[k] = uye_gun[k][g]
+        out.append((g, sum(son.values())))
+    return out
 
 
 def fiyat_baglami(urun: str, guncel: float) -> dict | None:

@@ -340,6 +340,14 @@ def hedef_secim_gorunumu(p: dict, st: dict) -> tuple[str, list]:
 
 # ===================== SET GÖRÜNÜMLERİ =====================
 
+def _bar(oran: float, uzunluk: int = 10) -> str:
+    """0..1 oranı blok çubuğa çevirir: [███████░░░] gibi. Set toplamı hedefe
+    yaklaştıkça (hedef/toplam oranı 1'e gittikçe) çubuk dolar."""
+    oran = max(0.0, min(1.0, oran))
+    dolu = round(oran * uzunluk)
+    return "[" + "█" * dolu + "░" * (uzunluk - dolu) + "]"
+
+
 def set_bul(sid: str) -> str | None:
     for ad in konfig.setleri_getir():
         if kisa_id(ad) == sid:
@@ -389,11 +397,30 @@ def set_gorunumu(ad: str, products: list[dict], state: State) -> tuple[str, list
         satirlar.append(f"🎯 Set hedefi: {tl(float(bilgi['hedef']))}"
                         + (" · HEDEFTE 🔥" if fark <= 0 and not bilgi["eksik"]
                            else f" ({kisa_tl(fark)} kaldı)"))
+    satirlar.append("(pahalıdan ucuza)")
+
+    # Üyeleri fiyata göre pahalıdan ucuza sırala (fiyatsızlar en altta)
+    uyeler = sorted(
+        bilgi["uyeler"],
+        key=lambda k: state.get(k).get("last_good_price") or -1, reverse=True)
     rows = []
-    for key in bilgi["uyeler"]:
+    for key in uyeler:
         p = next((q for q in products if konfig.product_key(q) == key), None)
         if p is not None:
             rows.append(urun_satiri(p, state.get(key)))
+
+    # Alt bar: toplam + hedefe ilerleme çubuğu (toplam hedefe indikçe dolar)
+    if bilgi["hedef"] and not bilgi["eksik"] and bilgi["toplam"] > 0:
+        hedef = float(bilgi["hedef"])
+        oran = min(1.0, hedef / bilgi["toplam"])
+        if bilgi["toplam"] <= hedef:
+            kuyruk = "🔥 HEDEFTE"
+        else:
+            kuyruk = f"→ 🎯 {kisa_tl(hedef)}"
+        satirlar.append(f"\n{_bar(oran)} {kisa_tl(bilgi['toplam'])} {kuyruk}")
+    else:
+        satirlar.append(f"\n💰 TOPLAM: {tl(bilgi['toplam'])}")
+
     rows.append([{"text": "🎯 Set hedefi", "callback_data": f"sethedef|{sid}"},
                  {"text": "📈 Toplam grafiği", "callback_data": f"setgrf|{sid}"}])
     rows.append([{"text": "🗑 Seti sil", "callback_data": f"setsil|{sid}"},
