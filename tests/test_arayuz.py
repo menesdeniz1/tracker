@@ -48,7 +48,7 @@ def test_urun_satiri_iki_sutun():
     assert sag["text"] == "🔥 90₺"                    # hedefte + kompakt fiyat
     st2 = {"last_good_price": 67204.0, "last_good_ts": time.time()}
     _, sag = urun_satiri({"label": "X", "price_threshold_tl": 62000}, st2)
-    assert "67.204₺" in sag["text"] and "%8" in sag["text"]
+    assert sag["text"] == "67.204₺→62.000₺"   # yüzde değil, somut hedef fiyat
     # iki buton da ayni karti acar
     assert sol["callback_data"] == urun_satiri({"label": "Uzun Bir Ürün Adı"}, st)[1]["callback_data"]
 
@@ -115,7 +115,7 @@ def test_kart_gorunumu_icerik():
     p = {"label": "Test Ürünü", "url": "https://www.amazon.com.tr/dp/X",
          "price_threshold_tl": 100}
     metin, rows = kart_gorunumu(p, st)
-    assert "Test Ürünü" in metin and "🎯" in metin and "%5,0 kaldı" in metin.replace(".", ",")
+    assert "Test Ürünü" in metin and "🎯" in metin and "5₺ kaldı" in metin
     duz = [b for r in rows for b in r]
     datalar = [b.get("callback_data", "") for b in duz]
     kid = kisa_id("Test Ürünü")

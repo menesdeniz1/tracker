@@ -121,8 +121,8 @@ def urun_satiri(p: dict, st: dict) -> list[dict]:
         elif fp and thr and fp <= float(thr):
             sag = f"🔥 {kisa_tl(fp)}"
         elif fp and thr:
-            kalan = (fp - float(thr)) / float(thr) * 100
-            sag = f"{kisa_tl(fp)} ·%{kalan:.0f}"
+            # güncel fiyat → hedef fiyat (yüzde yerine somut rakam)
+            sag = f"{kisa_tl(fp)}→{kisa_tl(float(thr))}"
         else:
             sag = kisa_tl(fp)
     return [{"text": label[:32], "callback_data": cb},
@@ -240,8 +240,8 @@ def kart_gorunumu(p: dict, st: dict) -> tuple[str, list]:
     if thr:
         fiyat_s += f" · 🎯 {tl(float(thr))}"
         if fp:
-            kalan = (fp - float(thr)) / float(thr) * 100
-            fiyat_s += " · HEDEFTE 🔥" if kalan <= 0 else f" (%{kalan:.1f} kaldı)"
+            kalan = fp - float(thr)
+            fiyat_s += " · HEDEFTE 🔥" if kalan <= 0 else f" ({kisa_tl(kalan)} kaldı)"
     satirlar.append(fiyat_s)
 
     dip, gun_sayisi = veri.dip30_oncesi(st)
