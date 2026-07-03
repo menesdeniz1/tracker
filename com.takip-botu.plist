@@ -17,10 +17,10 @@
     <key>ProgramArguments</key>
     <array>
         <string>/usr/bin/python3</string>
-        <string>/Users/enes/Desktop/tracker/guncelleyici.py</string>
+        <string>/Users/enes/tracker/guncelleyici.py</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>/Users/enes/Desktop/tracker</string>
+    <string>/Users/enes/tracker</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -28,8 +28,8 @@
     <key>ThrottleInterval</key>
     <integer>15</integer>
     <key>StandardOutPath</key>
-    <string>/Users/enes/Desktop/tracker/launchd.log</string>
+    <string>/Users/enes/tracker/launchd.log</string>
     <key>StandardErrorPath</key>
-    <string>/Users/enes/Desktop/tracker/launchd.log</string>
+    <string>/Users/enes/tracker/launchd.log</string>
 </dict>
 </plist>
