@@ -31,6 +31,12 @@ BLOCK_MARKERS = [
 
 AKAKCE_ARAMA = "https://www.akakce.com/arama/?q={}"
 
+# Kuyruk beklemesi bunu aşacaksa kontrol ERTELENİR (bu tur atlanır). Eski
+# davranışta izleyici, cezalı hostun sırasında semaforu tutarak 60 dk'ya kadar
+# uyuyabiliyordu; 3 slotun üçü de cezalı hosta denk gelince TÜM bot saatlerce
+# kilitleniyordu (loglardaki 15-57 dk'lık sessizlikler).
+MAX_KUYRUK_BEKLEME = 180.0
+
 
 class Sites:
     def __init__(self, raw: dict):
@@ -83,6 +89,10 @@ class HostThrottle:
 
     def slot(self, host: str):
         return _ThrottleSlot(self, host)
+
+    def tahmini_bekleme(self, host: str) -> float:
+        """Bu hosta şimdi girilse kaç sn kuyruk beklemesi olur (kilitsiz tahmin)."""
+        return max(0.0, self.next_ok[host] - time.monotonic())
 
     def penalize(self, host: str) -> float:
         """Engel algılandı → geri çekilmeyi büyüt (5 dk → 10 → ... → 60 dk)."""
@@ -403,6 +413,15 @@ async def check_once(context: BrowserContext, sites: Sites, throttle: HostThrott
     sonuc: dict = {"url": url, "host": host.replace("www.", ""),
              "price": None, "source": "yok", "seller": None, "title": "",
              "in_stock": None, "variant_ok": True, "variant": "AUTO", "blocked": False}
+
+    bekleme = throttle.tahmini_bekleme(host)
+    if bekleme > MAX_KUYRUK_BEKLEME:
+        # Host geri çekilmede — semaforu/kilidi dakikalarca işgal etme:
+        # bu turu atla, izleyici normal uykusuna dönsün, butonlar donmasın.
+        logging.info(f"[{prod.get('label')}] {host} geri çekilmede "
+                     f"(~{bekleme/60:.0f} dk) — bu tur atlandı.")
+        sonuc["blocked"] = True
+        return sonuc
 
     async with throttle.slot(host):
         page = await context.new_page()

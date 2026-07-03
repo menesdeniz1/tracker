@@ -207,6 +207,10 @@ class WatcherManager:
         self.settings = settings
         self.sem = asyncio.Semaphore(int(settings.get("max_concurrency", 3)))
         self.tasks: dict[str, asyncio.Task] = {}
+        # Kullanıcı işlemleri (link önizleme, Akakçe arama) için AYRI hızlı
+        # şerit: izleyicilerin kuyruğuna/geri çekilmesine takılıp arayüzü
+        # dondurmasın. İnsan tetiklediği için nazik bir aralık yeterli.
+        self.hizli = HostThrottle(3.0)
 
     def sync(self, products: list[dict],
              force: "set[str] | frozenset[str]" = frozenset()) -> None:

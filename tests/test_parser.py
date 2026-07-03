@@ -4,7 +4,7 @@ ondalık ayraç kombinasyonlarının tamamı burada sabitlenir; bir refactor bu
 kuralları bozarsa CI anında yakalar."""
 import pytest
 
-from takipbotu.fiyat import parse_try_amount, pct, tl
+from takipbotu.fiyat import kisa_tl, parse_try_amount, pct, tl
 
 
 @pytest.mark.parametrize("girdi, beklenen", [
@@ -46,3 +46,9 @@ def test_tl_bicimleme():
 def test_pct_bicimleme():
     assert pct(-4.23) == "↓%4,2"
     assert pct(2.1) == "↑%2,1"
+
+
+def test_kisa_tl_buton_bicimi():
+    assert kisa_tl(None) == "—"
+    assert kisa_tl(67204.0) == "67.204₺"
+    assert kisa_tl(759.9) == "760₺"          # ondalık yuvarlanır, kısa kalır

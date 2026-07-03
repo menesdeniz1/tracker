@@ -47,6 +47,14 @@ def tl(v: float | None) -> str:
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") + " TL"
 
 
+def kisa_tl(v: float | None) -> str:
+    """Buton içi kompakt fiyat: 26.450₺ (ondalıksız — telefonda buton genişliği
+    kısıtlı, fiyatın TAMAMI görünsün)."""
+    if v is None:
+        return "—"
+    return f"{v:,.0f}".replace(",", ".") + "₺"
+
+
 def pct(v: float) -> str:
     """7 günlük değişim gösterimi: -4.23 → '↓%4,2', 2.1 → '↑%2,1'."""
     ok = "↓" if v < 0 else "↑"

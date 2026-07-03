@@ -36,13 +36,27 @@ def test_sorun_metni():
     assert sorun_metni({"paused": True}, {}) is None     # duraklatma sorun değil
 
 
-def test_urun_satiri_durumlari():
-    assert urun_satiri({"label": "X", "paused": True}, {}).startswith("⏸")
-    assert urun_satiri({"label": "X"}, {}).startswith("⚠️")
+def test_urun_satiri_iki_sutun():
+    """Sol sütun ürün adı, sağ sütun fiyat/durum — fiyat telefonda hep görünür."""
+    sol, sag = urun_satiri({"label": "X", "paused": True}, {})
+    assert sag["text"].startswith("⏸")
+    sol, sag = urun_satiri({"label": "X"}, {})
+    assert sag["text"].startswith("⚠️") and "hiç" in sag["text"]
     st = {"last_good_price": 90.0, "last_good_ts": time.time()}
-    assert "HEDEFTE" in urun_satiri({"label": "X", "price_threshold_tl": 100}, st)
-    st2 = {"last_good_price": 110.0, "last_good_ts": time.time()}
-    assert "%10" in urun_satiri({"label": "X", "price_threshold_tl": 100}, st2)
+    sol, sag = urun_satiri({"label": "Uzun Bir Ürün Adı", "price_threshold_tl": 100}, st)
+    assert sol["text"].startswith("Uzun Bir")
+    assert sag["text"] == "🔥 90₺"                    # hedefte + kompakt fiyat
+    st2 = {"last_good_price": 67204.0, "last_good_ts": time.time()}
+    _, sag = urun_satiri({"label": "X", "price_threshold_tl": 62000}, st2)
+    assert "67.204₺" in sag["text"] and "%8" in sag["text"]
+    # iki buton da ayni karti acar
+    assert sol["callback_data"] == urun_satiri({"label": "Uzun Bir Ürün Adı"}, st)[1]["callback_data"]
+
+
+def test_urun_satiri_sorunlu_yas():
+    eski = {"last_good_ts": time.time() - 3 * 24 * 3600}
+    _, sag = urun_satiri({"label": "X"}, eski)
+    assert "3g" in sag["text"]
 
 
 def _state(tmp_path, data):
@@ -61,9 +75,11 @@ def test_durum_gorunumu_sorunlular_ustte(tmp_path):
     metin, rows = durum_gorunumu(products, state)
     assert "3 ürün" in metin and "⚠️ 1" in metin and "⏸ 1" in metin
     # ilk ürün satırı sorunlu olan olmalı, duraklatılan en sonda
-    urun_butonlari = [r[0]["text"] for r in rows if r[0].get("callback_data", "").startswith("kart|")]
-    assert urun_butonlari[0].startswith("⚠️")
-    assert urun_butonlari[-1].startswith("⏸")
+    # (durum artık SAĞ sütunda: [ad][fiyat/durum])
+    sag_sutun = [r[1]["text"] for r in rows
+                 if r[0].get("callback_data", "").startswith("kart|")]
+    assert sag_sutun[0].startswith("⚠️")
+    assert sag_sutun[-1].startswith("⏸")
 
 
 def test_durum_gorunumu_sayfalama(tmp_path):

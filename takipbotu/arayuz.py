@@ -20,7 +20,7 @@ from playwright.async_api import BrowserContext
 
 from . import konfig, veri
 from .bildirim import Notifier
-from .fiyat import parse_try_amount, pct, tl
+from .fiyat import kisa_tl, parse_try_amount, pct, tl
 from .izleyici import WatcherManager, grafik_png
 from .tarayici import akakce_ara, check_once
 from .veri import State
@@ -94,22 +94,39 @@ def sorun_metni(p: dict, st: dict) -> str | None:
     return None
 
 
-def urun_satiri(p: dict, st: dict) -> str:
-    """Durum listesindeki tek satırlık buton metni."""
+def _kisa_yas(st: dict) -> str:
+    """Sorunlu ürünün sağ sütunu için kısa yaş: 'hiç' / '14s' / '3g'."""
+    ts = st.get("last_good_ts")
+    if not ts:
+        return "hiç"
+    saat = (time.time() - ts) / 3600
+    return f"{saat/24:.0f}g" if saat > 48 else f"{saat:.0f}s"
+
+
+def urun_satiri(p: dict, st: dict) -> list[dict]:
+    """Durum listesindeki İKİ sütunlu ürün satırı: sol=ad, sağ=fiyat/durum.
+    Telefonda tek uzun buton kırpılıp fiyatı yutuyordu; iki sütunda fiyat
+    HER ZAMAN görünür. İki buton da aynı kartı açar."""
+    kid = kisa_id(konfig.product_key(p))
+    cb = f"kart|{kid}"
     label = p.get("label", "?")
     if p.get("paused"):
-        return f"⏸ {label[:34]}"
-    sorun = sorun_metni(p, st)
-    if sorun:
-        return f"⚠️ {label[:26]} — {sorun}"
-    fp = st.get("last_good_price")
-    thr = p.get("price_threshold_tl")
-    if fp and thr and fp <= float(thr):
-        return f"🔥 {label[:22]} — {tl(fp)} HEDEFTE"
-    if fp and thr:
-        kalan = (fp - float(thr)) / float(thr) * 100
-        return f"{label[:24]} — {tl(fp)} · %{kalan:.0f}"
-    return f"{label[:28]} — {tl(fp)}"
+        sag = "⏸ durdu"
+    else:
+        sorun = sorun_metni(p, st)
+        fp = st.get("last_good_price")
+        thr = p.get("price_threshold_tl")
+        if sorun:
+            sag = f"⚠️ {_kisa_yas(st)} okumadı"
+        elif fp and thr and fp <= float(thr):
+            sag = f"🔥 {kisa_tl(fp)}"
+        elif fp and thr:
+            kalan = (fp - float(thr)) / float(thr) * 100
+            sag = f"{kisa_tl(fp)} ·%{kalan:.0f}"
+        else:
+            sag = kisa_tl(fp)
+    return [{"text": label[:32], "callback_data": cb},
+            {"text": sag, "callback_data": cb}]
 
 
 def _sirala(products: list[dict], state: State) -> list[dict]:
@@ -155,9 +172,7 @@ def durum_gorunumu(products: list[dict], state: State, sayfa: int = 0,
 
     rows = []
     for p in dilim:
-        k = konfig.product_key(p)
-        rows.append([{"text": urun_satiri(p, state.get(k)),
-                      "callback_data": f"kart|{kisa_id(k)}"}])
+        rows.append(urun_satiri(p, state.get(konfig.product_key(p))))
     on_ek = "sor" if sadece_sorunlu else "d"
     if toplam_sayfa > 1:
         rows.append([{"text": "◀️", "callback_data": f"{on_ek}|{sayfa-1}"},
@@ -321,7 +336,7 @@ async def urun_on_izleme(manager: WatcherManager, notifier: Notifier,
     """Link geldi → sayfayı okur, adı/fiyatı çıkarır, hedefi butonla sordurur."""
     await notifier.send("🔎 Ürüne bakıyorum, 10-20 saniye...")
     try:
-        s = await check_once(manager.context, manager.sites, manager.throttle,
+        s = await check_once(manager.context, manager.sites, manager.hizli,
                              {"label": "yeni ürün", "mode": "price"}, url)
     except Exception as e:
         await notifier.send(f"Sayfayı açamadım ({type(e).__name__}). "
@@ -375,7 +390,7 @@ async def _akakce_akisi(manager: WatcherManager, notifier: Notifier, shared: dic
     key = konfig.product_key(p)
     kid = kisa_id(key)
     await notifier.send(f"🔎 Akakçe'de aranıyor: {p.get('label', '?')} (10-20 sn)...")
-    adaylar = await akakce_ara(manager.context, manager.throttle, p.get("label", ""))
+    adaylar = await akakce_ara(manager.context, manager.hizli, p.get("label", ""))
     if not adaylar:
         await notifier.send("Akakçe'de sonuç bulamadım. Ürünün Akakçe linkini "
                             "bulup bana göndersen de olur: karttan ➕ Kaynak ekle.")
@@ -389,6 +404,13 @@ async def _akakce_akisi(manager: WatcherManager, notifier: Notifier, shared: dic
 
 
 # ===================== ANA DİNLEYİCİ =====================
+
+def _gorev_sonucu_logla(gorev: asyncio.Task) -> None:
+    if gorev.cancelled():
+        return
+    e = gorev.exception()
+    if e is not None:
+        logging.error(f"Telegram update işlenemedi: {type(e).__name__}: {e}")
 
 async def telegram_listener(notifier: Notifier, shared: dict, state: State,
                             manager: WatcherManager, context: BrowserContext) -> None:
@@ -407,12 +429,12 @@ async def telegram_listener(notifier: Notifier, shared: dict, state: State,
                 continue
             for u in updates:
                 offset = u["update_id"] + 1
-                try:
-                    await _update_isle(u, notifier, shared, state, manager, context)
-                except asyncio.CancelledError:
-                    raise
-                except Exception as e:
-                    logging.error(f"Telegram update işlenemedi: {type(e).__name__}: {e}")
+                # Her update KENDİ görevinde işlenir: uzun süren bir işlem
+                # (link önizleme, Akakçe araması) sonraki buton basışlarını
+                # bekletmesin — arayüz asla donmasın.
+                gorev = asyncio.create_task(
+                    _update_isle(u, notifier, shared, state, manager, context))
+                gorev.add_done_callback(_gorev_sonucu_logla)
         except asyncio.CancelledError:
             raise
         except Exception as e:
