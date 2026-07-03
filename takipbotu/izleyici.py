@@ -132,6 +132,8 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                         st["last_good_price"] = fp
                         st["last_good_ts"] = time.time()
                         st["last_good_host"] = best["host"]
+                        if best.get("pazar"):
+                            st["pazar"] = best["pazar"]   # kartta gösterilir
 
                         # 📉 Hedefe inmese bile "son 30 günün en düşüğü" bilgisi.
                         # Hedef alarmı zaten atılacaksa mükerrer mesaj atılmaz.
@@ -185,6 +187,15 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                                 if baglam["tum_dip"] is not None:
                                     ek += (f"\n🏆 Tüm zamanlar dibi: {tl(baglam['tum_dip'])}"
                                            f" ({baglam['tum_dip_tarih']})")
+                            pazar = best.get("pazar")
+                            if pazar:
+                                ek += f"\n🏪 {pazar['satici_sayisi']} satıcı"
+                                if pazar.get("ikinci_fiyat"):
+                                    ek += f" · 2.si {tl(pazar['ikinci_fiyat'])}"
+                                    if fp and pazar["ikinci_fiyat"] > fp * 1.2:
+                                        ek += " ⚠️ tek satıcı belirgin ucuz — dikkat"
+                                elif pazar["satici_sayisi"] == 1:
+                                    ek += " ⚠️ (tek satıcı)"
                             onek = "🚨 ACİL — " if acil else "🔥 "
                             msg = f"{onek}{label}\n{detay}{ek}\n🌐 {kaynak}\n🔗 {best['url']}"
                             if await alarm_gonder(notifier, key, msg):

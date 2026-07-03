@@ -264,6 +264,17 @@ def kart_gorunumu(p: dict, st: dict) -> tuple[str, list]:
             satirlar.append(f"🏆 Tüm zamanlar dibi: {kisa_tl(baglam['tum_dip'])}"
                             f" ({baglam['tum_dip_tarih']})")
 
+    pazar = st.get("pazar")
+    if pazar:
+        pazar_s = f"🏪 {pazar['satici_sayisi']} satıcı"
+        if pazar.get("ikinci_fiyat"):
+            pazar_s += f" · 2. en ucuz: {kisa_tl(pazar['ikinci_fiyat'])}"
+            if fp and pazar["ikinci_fiyat"] > fp * 1.2:
+                pazar_s += " ⚠️ tek satıcı belirgin ucuz"
+        elif pazar["satici_sayisi"] == 1:
+            pazar_s += " ⚠️ tek satıcı"
+        satirlar.append(pazar_s)
+
     uyesi = [ad for ad, s in konfig.setleri_getir().items()
              if key in s.get("urunler", [])]
     if uyesi:

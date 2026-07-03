@@ -60,10 +60,26 @@ doğru `price_selector` yaz (sayfada sağ tık → İncele → fiyat elementinin
   eşleşme varsa kısa seçim listesi gelir.
 
 Diğer komutlar: `/sorunlu` (sadece okunamayan/engelliler — her birinde
-Akakçe'ye bağlama kısayolu), `/grafik`, `/csv`, `/yardim`. Alarm mesajlarının
-altında da hızlı aksiyonlar vardır: **✅ Aldım** (izlemeyi bırakır) ·
-**🔕 1 hafta sustur** · **🎯 hedefi değiştir**. Eski numaralı komutlar
-(`/sil 3`, `/hedef 3 12750`, `/akakce 3`) geriye uyum için hâlâ çalışır.
+Akakçe'ye bağlama kısayolu), `/setler`, `/grafik`, `/csv`, `/yardim`.
+Alarm mesajlarının altında da hızlı aksiyonlar vardır: **✅ Aldım** (izlemeyi
+bırakır) · **🔕 1 hafta sustur** · **🎯 hedefi değiştir**. Eski numaralı
+komutlar (`/sil 3`, `/hedef 3 12750`, `/akakce 3`) geriye uyum için hâlâ çalışır.
+
+**📦 Setler (PC toplama):** karttaki *Sete ekle* ile ürünleri grupla
+("PC Toplama" gibi) → `/setler`'de **canlı toplam** + dünle kıyas + set hedefi.
+Parçalar tek tek hedefte olmasa bile **toplam** set hedefinin altına inince
+bildirim gelir; set toplamının zaman grafiği de çizilir.
+
+**Fiyat zekâsı:** alarm ve kartta "bu iyi bir fiyat mı?" bağlamı — 90 günün
+dibi/medyanı, günlerin yüzde kaçından ucuz olduğu, tüm zamanların dibi
+(🟢 dip bölgesi / 🟡 ortalama altı / 🔴 pahalı dönem) ve Akakçe'de **satıcı
+sayısı + 2. en ucuz fiyat** (tek satıcılı şüpheli ucuzluk uyarısıyla).
+
+**🚨 Acil hedef:** hedef menüsünden ikinci bir eşik — altına inince cooldown
+beklemez, sessiz saati deler. **Sessiz saatler:** `quiet_hours: "0-8"` ayarıyla
+gece normal alarmlar ertelenir (sabah kendiliğinden gelir), ACİL geçer.
+Günlük özet artık **değişenler raporu**: sadece düşen/yükselenler + set
+toplamları. Ölü linkler (404) ayrıca algılanıp haftada bir hatırlatılır.
 
 Kart gezinmesi mesajı yerinde düzenler — sohbet mesaj çöplüğüne dönmez.
 Sadece `telegram_chat_id`'deki sohbetten gelen komutlar işlenir; yabancılar yok sayılır.

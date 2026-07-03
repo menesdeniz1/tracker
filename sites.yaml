@@ -42,6 +42,9 @@ sites:
     # tarayıcıda incele'yle satıcı elementini bulup burayı güncelle;
     # bulunamazsa bot sessizce atlar, fiyat takibi etkilenmez.
     seller_selector: "#PL > li:first-child img[alt]"
+    # Satıcı listesi: satıcı sayısı + 2. en ucuz fiyat buradan okunur
+    # (tek satıcılı "anormal ucuz" tuzağı bildirimde görünür olsun)
+    sellers_selector: "#PL > li"
     wait_after_page_load: 3
 
   tebilon.com:

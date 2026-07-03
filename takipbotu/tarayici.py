@@ -260,6 +260,28 @@ async def get_seller(page: Page, strat: dict) -> str | None:
         return None
 
 
+async def get_pazar(page: Page, strat: dict) -> dict | None:
+    """Karşılaştırma sitesinde (Akakçe) pazar derinliği: satıcı sayısı +
+    2. en ucuz fiyat. Tek satıcılı 'anormal ucuz' tuzağını görünür kılar.
+    sites.yaml → sellers_selector yoksa atlanır; hata olursa sessizce None."""
+    sel = strat.get("sellers_selector")
+    if not sel:
+        return None
+    try:
+        locs = page.locator(sel)
+        n = await locs.count()
+        if n == 0:
+            return None
+        ikinci = None
+        if n >= 2:
+            fsel = strat.get("sellers_price_selector", "span.pt_v8")
+            ikinci = parse_try_amount(
+                await locs.nth(1).locator(fsel).first.inner_text(timeout=1500))
+        return {"satici_sayisi": n, "ikinci_fiyat": ikinci}
+    except Exception:
+        return None
+
+
 async def _akakce_sonuc_ayikla(page: Page) -> list[dict]:
     """Açık Akakçe arama sayfasından ürün sayfası linklerini toplar.
     Sayfa yapısına değil, Akakçe'nin değişmez URL kalıbına dayanır:
@@ -419,7 +441,7 @@ async def check_once(context: BrowserContext, sites: Sites, throttle: HostThrott
     sonuc: dict = {"url": url, "host": host.replace("www.", ""),
              "price": None, "source": "yok", "seller": None, "title": "",
              "in_stock": None, "variant_ok": True, "variant": "AUTO",
-             "blocked": False, "dead": False}
+             "blocked": False, "dead": False, "pazar": None}
 
     bekleme = throttle.tahmini_bekleme(host)
     if bekleme > MAX_KUYRUK_BEKLEME:
@@ -473,6 +495,7 @@ async def check_once(context: BrowserContext, sites: Sites, throttle: HostThrott
             if "price" in mode:
                 sonuc["price"], sonuc["source"] = await get_price(page, strat)
                 sonuc["seller"] = await get_seller(page, strat)
+                sonuc["pazar"] = await get_pazar(page, strat)
             throttle.reward(host)
         finally:
             await page.close()

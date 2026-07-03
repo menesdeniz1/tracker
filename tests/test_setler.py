@@ -204,3 +204,15 @@ def test_kart_set_uyeligi_gosterir(tmp_path, monkeypatch):
     metin, _ = arayuz.kart_gorunumu(
         {"label": "CPU", "url": "http://a"}, {"last_good_price": 100.0})
     assert "📦 Set: PC" in metin
+
+
+def test_kart_pazar_bilgisi(tmp_path, monkeypatch):
+    _ortam(tmp_path, monkeypatch)
+    st = {"last_good_price": 100.0,
+          "pazar": {"satici_sayisi": 5, "ikinci_fiyat": 130.0}}
+    metin, _ = arayuz.kart_gorunumu({"label": "CPU", "url": "http://a"}, st)
+    assert "🏪 5 satıcı" in metin and "2. en ucuz: 130₺" in metin
+    assert "belirgin ucuz" in metin            # 130 > 100*1.2 → tek satıcı uyarısı
+    st["pazar"] = {"satici_sayisi": 1, "ikinci_fiyat": None}
+    metin, _ = arayuz.kart_gorunumu({"label": "CPU", "url": "http://a"}, st)
+    assert "⚠️ tek satıcı" in metin
