@@ -158,6 +158,11 @@ def generate(csv_path: Path = HISTORY_CSV, out_path: Path = OUT_HTML,
                      "son": son[1], "enDusuk": en_dusuk,
                      "series": siteler, "table": tablo})
 
+    return _yaz(data, out_path)
+
+
+def _yaz(data: list[dict], out_path: Path) -> Path:
+    """Hazır seri verisini HTML'e döker (generate ve generate_set ortak sonu)."""
     payload = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
     # Chart.js yerelde varsa HTML'e gömülür → dosya tek başına, internetsiz açılır
     # (Telegram'dan indirip telefonda açarken de çalışır); yoksa CDN'e düşülür.
@@ -169,6 +174,22 @@ def generate(csv_path: Path = HISTORY_CSV, out_path: Path = OUT_HTML,
     html = _HTML.replace("__CHARTJS__", chartjs).replace("__DATA__", payload)
     out_path.write_text(html, encoding="utf-8")
     return out_path
+
+
+def generate_set(ad: str, points: list, hedef: float | None = None,
+                 out_path: Path = OUT_HTML) -> Path:
+    """Set TOPLAMININ zaman serisi: points = [(\"2026-07-01\", 89407.0), ...].
+    Kesikli çizgi: set hedefi."""
+    if not points:
+        raise ValueError("Set için çizilecek toplam verisi yok "
+                         "(tüm üyelerin okunduğu ortak gün gerekli).")
+    pts = [[_epoch_ms(g + "T12:00:00"), v] for g, v in points]
+    tablo = [[g, "toplam", v] for g, v in reversed(points)][:30]
+    data = [{"label": f"📦 {ad} — set toplamı", "hedef": hedef,
+             "son": points[-1][1], "enDusuk": min(v for _, v in points),
+             "series": [{"site": "toplam", "slot": 0, "points": pts}],
+             "table": tablo}]
+    return _yaz(data, out_path)
 
 
 _HTML = """<!DOCTYPE html>

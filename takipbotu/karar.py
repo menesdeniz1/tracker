@@ -48,7 +48,7 @@ def fiyat_suphali(prod: dict, s: dict, st: dict) -> bool:
 def en_iyi_kaynak(prod: dict, sonuclar: list[dict]) -> dict | None:
     """Kaynaklar arasından bildirime esas olanı seçer: stok modunda stoklu olan,
     fiyat modunda EN UCUZ fiyatlı olan (Akakçe birincil kurgusunun kalbi)."""
-    adaylar = [s for s in sonuclar if not s["blocked"]]
+    adaylar = [s for s in sonuclar if not s["blocked"] and not s.get("dead")]
     if not adaylar:
         return None
     mode = prod.get("mode", "price")

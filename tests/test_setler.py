@@ -1,0 +1,206 @@
+# -*- coding: utf-8 -*-
+"""Setler + fiyat bağlamı + değişenler raporu + sessiz saat + acil hedef +
+ölü kaynak eleme — 'sırayla yap' paketinin testleri."""
+import asyncio
+import time
+from datetime import date, datetime, timedelta
+
+import yaml
+
+from takipbotu import arayuz, izleyici, konfig, veri
+from takipbotu.karar import en_iyi_kaynak
+
+
+def _ortam(tmp_path, monkeypatch, urunler=None):
+    pyaml = tmp_path / "products.yaml"
+    pyaml.write_text(yaml.safe_dump({"products": urunler or [
+        {"label": "CPU", "url": "http://a", "price_threshold_tl": 100},
+        {"label": "GPU", "url": "http://b", "price_threshold_tl": 200},
+    ]}), encoding="utf-8")
+    monkeypatch.setattr(konfig, "PRODUCTS_YAML", pyaml)
+    monkeypatch.setattr(konfig, "TELEGRAM_URUNLER", tmp_path / "tg.yaml")
+    monkeypatch.setattr(veri, "VERI_DB", tmp_path / "veri.db")
+    monkeypatch.setattr(veri, "HISTORY_CSV", tmp_path / "yok.csv")
+    state = veri.State(tmp_path / "state.json")
+    return state
+
+
+# ---------- konfig: set yönetimi ----------
+
+def test_set_kur_cikar_bosalinca_silinir(tmp_path, monkeypatch):
+    _ortam(tmp_path, monkeypatch)
+    konfig.set_urun("PC", "CPU")
+    konfig.set_urun("PC", "GPU")
+    assert konfig.setleri_getir()["PC"]["urunler"] == ["CPU", "GPU"]
+    konfig.set_hedef("PC", 90000.0)
+    assert konfig.setleri_getir()["PC"]["hedef"] == 90000.0
+    konfig.set_urun("PC", "CPU", ekle=False)
+    konfig.set_urun("PC", "GPU", ekle=False)
+    assert "PC" not in konfig.setleri_getir()      # boşalan set silinir
+
+
+def test_urun_silinince_setten_duser(tmp_path, monkeypatch):
+    _ortam(tmp_path, monkeypatch)
+    konfig.set_urun("PC", "CPU")
+    konfig.tg_urun_sil("CPU")
+    assert "PC" not in konfig.setleri_getir()
+
+
+def test_acil_hedef_yukleme(tmp_path, monkeypatch):
+    _ortam(tmp_path, monkeypatch)
+    konfig.tg_acil_hedef("CPU", 80.0)
+    p = next(q for q in konfig.load_products() if q["label"] == "CPU")
+    assert p["price_threshold2_tl"] == 80.0
+    konfig.tg_acil_hedef("CPU", None)
+    p = next(q for q in konfig.load_products() if q["label"] == "CPU")
+    assert "price_threshold2_tl" not in p
+
+
+# ---------- veri: set serisi + fiyat bağlamı ----------
+
+def test_set_toplam_serisi_ortak_gun_kurali(tmp_path, monkeypatch):
+    _ortam(tmp_path, monkeypatch)
+    asyncio.run(veri.append_history("CPU", "s", 100.0, None, "seçici"))
+    asyncio.run(veri.append_history("GPU", "s", 200.0, None, "seçici"))
+    seri = veri.set_toplam_serisi(["CPU", "GPU"])
+    assert len(seri) == 1 and seri[0][1] == 300.0
+    # tek üyenin verisi olan gün toplamda YOK (sahte sıçrama koruması)
+    assert veri.set_toplam_serisi(["CPU", "Hayalet"]) == []
+
+
+def test_fiyat_baglami_ve_sinyal(tmp_path, monkeypatch):
+    _ortam(tmp_path, monkeypatch)
+    conn = veri._db()
+    for i in range(10):                       # 10 günlük veri: 100..109
+        g = (date.today() - timedelta(days=i)).isoformat()
+        conn.execute("INSERT INTO okumalar(ts,urun,site,fiyat,stok,kaynak) "
+                     "VALUES(?,?,?,?,NULL,'seçici')",
+                     (f"{g}T10:00:00", "CPU", "s", 100.0 + i))
+    conn.commit()
+    b = veri.fiyat_baglami("CPU", 100.0)
+    assert b["dip90"] == 100.0 and b["tum_dip"] == 100.0
+    assert b["yuzde"] == 100 and b["sinyal"].startswith("🟢")
+    assert veri.fiyat_baglami("CPU", 120.0)["sinyal"].startswith("🔴")
+    assert veri.fiyat_baglami("Hayalet", 50.0) is None     # veri yok → bağlam yok
+
+
+# ---------- izleyici: toplamlar, rapor, sessiz saat, set bildirimi ----------
+
+def test_set_toplamlari_ve_eksik(tmp_path, monkeypatch):
+    state = _ortam(tmp_path, monkeypatch)
+    konfig.set_urun("PC", "CPU")
+    konfig.set_urun("PC", "GPU")
+    state.get("CPU")["last_good_price"] = 100.0
+    s = izleyici.set_toplamlari(state)[0]
+    assert s["toplam"] == 100.0 and s["eksik"] == ["GPU"]
+
+
+def test_degisim_raporu(tmp_path, monkeypatch):
+    state = _ortam(tmp_path, monkeypatch)
+    dun = (date.today() - timedelta(days=1)).isoformat()
+    simdi = time.time()
+    state.data = {
+        "CPU": {"last_good_price": 95.0, "last_good_ts": simdi,
+                "daily_min": {dun: 100.0}},
+        "GPU": {"last_good_price": 210.0, "last_good_ts": simdi,
+                "daily_min": {dun: 200.0}},
+    }
+    products = [{"label": "CPU"}, {"label": "GPU"}, {"label": "Sessiz"}]
+    r = izleyici.degisim_raporu(products, state)
+    assert "Düşenler" in r and "CPU" in r and "↓%5,0" in r
+    assert "Yükselenler" in r and "GPU" in r
+    assert "1 okunamıyor" in r                 # 'Sessiz' hiç okunmamış
+    # hareket yoksa tek satır
+    state.data = {"CPU": {"last_good_price": 100.0, "last_good_ts": simdi,
+                          "daily_min": {dun: 100.0}}}
+    assert "kayda değer" in izleyici.degisim_raporu([{"label": "CPU"}], state)
+
+
+def test_sessiz_saat(monkeypatch):
+    class Sabit(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 1, 1, 3, 0)
+    monkeypatch.setattr(izleyici, "datetime", Sabit)
+    assert izleyici.sessiz_saat_mi({"quiet_hours": "0-8"})
+    assert izleyici.sessiz_saat_mi({"quiet_hours": "23-7"})    # gece yarısı aşan
+    assert not izleyici.sessiz_saat_mi({"quiet_hours": "9-18"})
+    assert not izleyici.sessiz_saat_mi({})
+    assert not izleyici.sessiz_saat_mi({"quiet_hours": "bozuk"})
+
+
+class _Notifier:
+    def __init__(self):
+        self.mesajlar = []
+
+    async def send(self, text):
+        self.mesajlar.append(text)
+        return True
+
+
+def test_set_toplam_bildirimi(tmp_path, monkeypatch):
+    state = _ortam(tmp_path, monkeypatch)
+    konfig.set_urun("PC", "CPU")
+    konfig.set_urun("PC", "GPU")
+    konfig.set_hedef("PC", 250.0)
+    state.get("CPU")["last_good_price"] = 100.0
+    state.get("GPU")["last_good_price"] = 140.0
+    n = _Notifier()
+    asyncio.run(izleyici.set_toplam_kontrol(n, state, "CPU"))
+    assert n.mesajlar and "SET HEDEFTE" in n.mesajlar[0]
+    # 24 saat cooldown: ikinci çağrı bildirmez
+    asyncio.run(izleyici.set_toplam_kontrol(n, state, "CPU"))
+    assert len(n.mesajlar) == 1
+    # eksik üye varsa bildirmez
+    state.get("GPU").pop("last_good_price")
+    state.get("_set:PC")["last_notify_ts"] = 0
+    asyncio.run(izleyici.set_toplam_kontrol(n, state, "CPU"))
+    assert len(n.mesajlar) == 1
+
+
+# ---------- karar: ölü kaynak elenir ----------
+
+def test_olu_kaynak_elenir():
+    s1 = {"price": 50.0, "blocked": False, "dead": True,
+          "variant_ok": True, "in_stock": None}
+    s2 = {"price": 90.0, "blocked": False, "dead": False,
+          "variant_ok": True, "in_stock": None}
+    assert en_iyi_kaynak({"mode": "price"}, [s1, s2])["price"] == 90.0
+
+
+# ---------- arayuz: set görünümleri ----------
+
+def test_set_gorunumleri(tmp_path, monkeypatch):
+    state = _ortam(tmp_path, monkeypatch)
+    konfig.set_urun("PC", "CPU")
+    konfig.set_urun("PC", "GPU")
+    konfig.set_hedef("PC", 250.0)
+    state.get("CPU")["last_good_price"] = 100.0
+    state.get("GPU").update({"last_good_price": 140.0,
+                             "last_good_ts": time.time()})
+    state.get("CPU")["last_good_ts"] = time.time()
+
+    metin, rows = arayuz.setler_gorunumu(state)
+    assert "PC" in rows[0][0]["text"] and "240" in rows[0][0]["text"]
+
+    products = konfig.load_products()
+    metin, rows = arayuz.set_gorunumu("PC", products, state)
+    assert "TOPLAM: 240,00 TL" in metin and "HEDEFTE 🔥" in metin
+    datalar = [b.get("callback_data", "") for r in rows for b in r]
+    sid = arayuz.kisa_id("PC")
+    assert f"sethedef|{sid}" in datalar and f"setgrf|{sid}" in datalar
+
+    p = products[0]
+    metin, rows = arayuz.set_secim_gorunumu(p)
+    datalar = [b["callback_data"] for r in rows for b in r]
+    kid = arayuz.kisa_id("CPU")
+    assert f"setcik|{kid}|{sid}" in datalar      # üye → çıkarma önerilir
+    assert f"setyeni|{kid}" in datalar
+
+
+def test_kart_set_uyeligi_gosterir(tmp_path, monkeypatch):
+    _ortam(tmp_path, monkeypatch)
+    konfig.set_urun("PC", "CPU")
+    metin, _ = arayuz.kart_gorunumu(
+        {"label": "CPU", "url": "http://a"}, {"last_good_price": 100.0})
+    assert "📦 Set: PC" in metin

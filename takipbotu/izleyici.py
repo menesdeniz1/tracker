@@ -12,7 +12,7 @@ from playwright.async_api import BrowserContext
 
 from . import konfig, veri
 from .bildirim import Notifier
-from .fiyat import pct, tl
+from .fiyat import kisa_tl, pct, tl
 from .karar import alarm_gerekli, en_iyi_kaynak, fiyat_suphali
 from .tarayici import HostThrottle, Sites, check_once
 from .veri import State
@@ -69,6 +69,20 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                 sonuclar = await check_product(context, sites, throttle, prod)
                 best = en_iyi_kaynak(prod, sonuclar)
                 hepsi_engelli = all(s["blocked"] for s in sonuclar)
+
+                # Ölü kaynak takibi: kartta görünür + haftada bir uyarı
+                oluler = [s["url"] for s in sonuclar if s.get("dead")]
+                if oluler:
+                    st["olu_kaynaklar"] = oluler
+                    if time.time() - st.get("dead_notify_ts", 0) > 7 * 24 * 3600:
+                        st["dead_notify_ts"] = time.time()
+                        await notifier.send(
+                            f"🔗 {label} ürününün şu kayna(ğı/kları) ölmüş "
+                            "görünüyor (sayfa kaldırılmış):\n"
+                            + "\n".join(f"• {u}" for u in oluler)
+                            + "\nKarttan ➕ ile yeni kaynak ekleyebilirsin.")
+                elif st.pop("olu_kaynaklar", None):
+                    pass  # kaynak dirildi — işareti kaldır
 
                 if best is not None and not hepsi_engelli:
                     fp = best["price"]
@@ -135,7 +149,12 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                                 st["low30_notify_ts"] = time.time()
                                 logging.info(f"[{label}] 30-gün dibi bildirildi: {tl(fp)}")
 
+                        # üyesi olduğu setlerin TOPLAM hedefini kontrol et
+                        await set_toplam_kontrol(notifier, state, key)
+
                     if gerekli and not supheli:
+                        thr2 = prod.get("price_threshold2_tl")
+                        acil = bool(fp is not None and thr2 and fp <= float(thr2))
                         son_ts = st.get("last_notify_ts", 0)
                         son_fiyat = st.get("last_notify_price")
                         sustur = st.get("mute_until", 0)
@@ -143,17 +162,36 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                                           - datetime.fromtimestamp(son_ts) > cooldown)
                         daha_da_dustu = (fp is not None and son_fiyat
                                          and fp <= son_fiyat * (1 - renotify_drop / 100))
+                        # ACİL eşiği: cooldown beklemez ama kendi 3 saatlik
+                        # frenine sahiptir (spam olmasın)
+                        acil_zamani = acil and (time.time()
+                                                - st.get("last_notify2_ts", 0) > 3 * 3600)
                         if time.time() < sustur:
                             logging.info(f"[{label}] hedefte ama susturulmuş "
                                          f"({datetime.fromtimestamp(sustur):%d.%m %H:%M}'e kadar).")
-                        elif cooldown_gecti or daha_da_dustu:
+                        elif sessiz_saat_mi(settings) and not acil:
+                            # state güncellenmez → sessizlik bitince kendiliğinden bildirir
+                            logging.info(f"[{label}] hedefte ama sessiz saat — ertelendi.")
+                        elif cooldown_gecti or daha_da_dustu or acil_zamani:
                             kaynak = best["host"]
                             if best.get("seller"):
                                 kaynak += f" — satıcı: {best['seller']}"
-                            msg = f"🔥 {label}\n{detay}\n🌐 {kaynak}\n🔗 {best['url']}"
+                            ek = ""
+                            baglam = veri.fiyat_baglami(label, fp) if fp else None
+                            if baglam:
+                                ek = (f"\n📊 {baglam['sinyal']} — 90g dip "
+                                      f"{tl(baglam['dip90'])} · medyan {tl(baglam['medyan90'])}"
+                                      f" · günlerin %{baglam['yuzde']}'inden ucuz")
+                                if baglam["tum_dip"] is not None:
+                                    ek += (f"\n🏆 Tüm zamanlar dibi: {tl(baglam['tum_dip'])}"
+                                           f" ({baglam['tum_dip_tarih']})")
+                            onek = "🚨 ACİL — " if acil else "🔥 "
+                            msg = f"{onek}{label}\n{detay}{ek}\n🌐 {kaynak}\n🔗 {best['url']}"
                             if await alarm_gonder(notifier, key, msg):
                                 st["last_notify_ts"] = time.time()
                                 st["last_notify_price"] = fp
+                                if acil:
+                                    st["last_notify2_ts"] = time.time()
                                 logging.warning(f"!!! BİLDİRİM: {label} !!!")
                         else:
                             logging.info(f"[{label}] hedefte ama cooldown sürüyor "
@@ -176,6 +214,64 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
         else:
             await asyncio.sleep(random.randint(int(prod.get("sleep_min", 300)),
                                                int(prod.get("sleep_max", 600))))
+
+
+def sessiz_saat_mi(settings: dict) -> bool:
+    """quiet_hours ayarı ('0-8' gibi): bu aralıkta normal alarmlar ERTELENİR
+    (state güncellenmediği için sessizlik bitince kendiliğinden tetiklenir);
+    🚨 ACİL alarmlar her zaman geçer."""
+    aralik = settings.get("quiet_hours")
+    if not aralik:
+        return False
+    try:
+        bas, son = (int(x) for x in str(aralik).split("-"))
+    except ValueError:
+        return False
+    saat = datetime.now().hour
+    if bas <= son:
+        return bas <= saat < son
+    return saat >= bas or saat < son      # gece yarısını aşan aralık (23-7)
+
+
+def set_toplamlari(state: State) -> list[dict]:
+    """Her set için canlı toplam: {'ad', 'hedef', 'toplam', 'eksik' (fiyatsız üye)}."""
+    out = []
+    for ad, s in konfig.setleri_getir().items():
+        toplam, eksik = 0.0, []
+        for key in s.get("urunler", []):
+            fp = state.get(key).get("last_good_price")
+            if fp:
+                toplam += fp
+            else:
+                eksik.append(key)
+        out.append({"ad": ad, "hedef": s.get("hedef"), "toplam": toplam,
+                    "uyeler": list(s.get("urunler", [])), "eksik": eksik})
+    return out
+
+
+async def set_toplam_kontrol(notifier: Notifier, state: State, key: str) -> None:
+    """Ürün fiyatı güncellenince, üyesi olduğu setlerin TOPLAM hedefini kontrol
+    eder. Tüm üyelerin fiyatı okunmuşsa ve toplam hedefin altındaysa bildirir
+    (set başına 24 saat cooldown). Parçalar tek tek hedefte olmasa bile toplam
+    fırsatını yakalar — PC toplama senaryosunun kalbi."""
+    for s in set_toplamlari(state):
+        if key not in s["uyeler"] or s["eksik"] or not s["hedef"]:
+            continue
+        if s["toplam"] > float(s["hedef"]):
+            continue
+        st = state.get(f"_set:{s['ad']}")
+        if time.time() - st.get("last_notify_ts", 0) < 24 * 3600:
+            continue
+        parcalar = "\n".join(
+            f"  • {k}: {tl(state.get(k).get('last_good_price'))}"
+            for k in s["uyeler"])
+        if await notifier.send(
+                f"📦🔥 SET HEDEFTE: {s['ad']}\n"
+                f"💰 Toplam {tl(s['toplam'])} (hedef {tl(float(s['hedef']))})\n"
+                f"{parcalar}"):
+            st["last_notify_ts"] = time.time()
+            await state.save()
+            logging.warning(f"!!! SET BİLDİRİMİ: {s['ad']} !!!")
 
 
 async def alarm_gonder(notifier: Notifier, key: str, msg: str) -> bool:
@@ -262,11 +358,8 @@ def durum_ozeti(products: list, state: State) -> str:
     return "\n".join(satirlar)
 
 
-async def grafik_png(context: BrowserContext, urun: str | None = None) -> Path:
-    """fiyat_grafigi.html'i üretir, tarayıcıda açıp PNG'ye çeker (sendPhoto için).
-    urun verilirse sadece o ürünün grafiği çizilir (kart → 📈 butonu)."""
-    import grafik
-    html = grafik.generate(urun=urun)
+async def png_cek(context: BrowserContext, html: Path) -> Path:
+    """Verilen grafik HTML'ini tarayıcıda açıp PNG'ye çeker (sendPhoto için)."""
     page = await context.new_page()
     try:
         await page.set_viewport_size({"width": 900, "height": 700})
@@ -278,9 +371,61 @@ async def grafik_png(context: BrowserContext, urun: str | None = None) -> Path:
     return konfig.GRAFIK_PNG
 
 
+async def grafik_png(context: BrowserContext, urun: str | None = None) -> Path:
+    """fiyat_grafigi.html'i üretir + PNG çeker. urun verilirse tek ürün."""
+    import grafik
+    return await png_cek(context, grafik.generate(urun=urun))
+
+
+def degisim_raporu(products: list, state: State) -> str:
+    """Günlük özet: tam liste yerine sadece HAREKET — düşen/yükselen top 5,
+    sorunlu sayısı, set toplamları. Hareket yoksa tek satır."""
+    from datetime import date
+    dun = (date.today() - timedelta(days=1)).isoformat()
+    hareket, sorunlu = [], 0
+    for p in products:
+        if p.get("paused"):
+            continue
+        st = state.get(konfig.product_key(p))
+        ts = st.get("last_good_ts")
+        if not ts or time.time() - ts > 12 * 3600:
+            sorunlu += 1
+            continue
+        simdi = st.get("last_good_price")
+        onceki = (st.get("daily_min") or {}).get(dun)
+        if simdi and onceki and onceki > 0:
+            d = (simdi - onceki) / onceki * 100
+            if abs(d) >= 0.5:
+                hareket.append((d, p.get("label", "?"), onceki, simdi))
+
+    satirlar = [f"✅ {len(products)} ürün izleniyor"
+                + (f" · ⚠️ {sorunlu} okunamıyor (/sorunlu)" if sorunlu else "")]
+    dusen = sorted(h for h in hareket if h[0] < 0)[:5]
+    cikan = sorted((h for h in hareket if h[0] > 0), reverse=True)[:5]
+    if dusen:
+        satirlar.append("\n📉 Düşenler (24s):")
+        satirlar += [f"• {ad}: {kisa_tl(o)}→{kisa_tl(s)} ({pct(d)})"
+                     for d, ad, o, s in dusen]
+    if cikan:
+        satirlar.append("\n📈 Yükselenler (24s):")
+        satirlar += [f"• {ad}: {kisa_tl(o)}→{kisa_tl(s)} ({pct(d)})"
+                     for d, ad, o, s in cikan]
+    if not dusen and not cikan:
+        satirlar.append("Son 24 saatte kayda değer fiyat hareketi yok.")
+    for s in set_toplamlari(state):
+        eksik = f" ({len(s['eksik'])} üye fiyatsız)" if s["eksik"] else ""
+        hedef = ""
+        if s["hedef"] and not s["eksik"]:
+            fark = s["toplam"] - float(s["hedef"])
+            hedef = (" · 🔥 HEDEFTE" if fark <= 0
+                     else f" · hedefe {kisa_tl(fark)}")
+        satirlar.append(f"\n📦 {s['ad']}: {kisa_tl(s['toplam'])}{eksik}{hedef}")
+    return "\n".join(satirlar)
+
+
 async def heartbeat(notifier: Notifier, settings: dict, shared: dict,
                     state: State, context: BrowserContext) -> None:
-    """Her gün belirli saatte 'bot yaşıyor' + fiyat özeti + 7g trend.
+    """Her gün belirli saatte değişenler raporu (bot yaşıyor sinyali).
     Haftada bir (weekly_chart_day) grafik PNG olarak da gelir."""
     saat = settings.get("heartbeat_hour")
     if saat is None:
@@ -293,8 +438,7 @@ async def heartbeat(notifier: Notifier, settings: dict, shared: dict,
         await asyncio.sleep((hedef - simdi).total_seconds())
 
         products = shared["products"]
-        await notifier.send(f"✅ Takip botu çalışıyor — {len(products)} ürün izleniyor.\n"
-                            + durum_ozeti(products, state))
+        await notifier.send(degisim_raporu(products, state))
         gun = settings.get("weekly_chart_day", 0)
         if gun is not None and datetime.now().weekday() == int(gun):
             try:

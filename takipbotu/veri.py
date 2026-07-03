@@ -101,6 +101,50 @@ def gecmis_oku(urun: str | None = None) -> list[dict]:
             for ts, u, s, f in _db().execute(q, args).fetchall()]
 
 
+def set_toplam_serisi(keys: list[str], gun: int = 60) -> list[tuple[str, float]]:
+    """Set toplam grafiği için günlük seri: her gün, TÜM üyelerin o günkü
+    minimum fiyatları toplamı. Bir üyenin verisi olmayan gün atlanır ki
+    'ürün eklendi/okunamadı' günleri toplamda sahte sıçrama yapmasın."""
+    if not keys:
+        return []
+    q = ("SELECT date(ts) g, urun, MIN(fiyat) FROM okumalar "
+         f"WHERE fiyat IS NOT NULL AND urun IN ({','.join('?' * len(keys))}) "
+         "AND ts >= date('now', ?) GROUP BY g, urun")
+    gunluk: dict[str, dict[str, float]] = {}
+    for g, urun, f in _db().execute(q, (*keys, f"-{gun} day")).fetchall():
+        gunluk.setdefault(g, {})[urun] = f
+    return [(g, sum(v.values())) for g, v in sorted(gunluk.items())
+            if len(v) == len(keys)]
+
+
+def fiyat_baglami(urun: str, guncel: float) -> dict | None:
+    """'Bu iyi bir fiyat mı?' bağlamı (Keepa mantığı): son 90 günün günlük
+    minimumlarından dip/medyan/yüzdelik + tüm zamanların dibi. En az 5 günlük
+    veri yoksa None (yanıltıcı bağlam sunma)."""
+    import statistics
+    vals = [f for (f,) in _db().execute(
+        "SELECT MIN(fiyat) FROM okumalar WHERE urun = ? AND fiyat IS NOT NULL "
+        "AND ts >= date('now', '-90 day') GROUP BY date(ts)", (urun,)).fetchall()]
+    if len(vals) < 5:
+        return None
+    dip90, medyan90 = min(vals), statistics.median(vals)
+    # yüzdelik: 90 günün yüzde kaçında bugünkünden pahalıydı? (yüksek = ucuz gün)
+    yuzde = round(sum(1 for v in vals if v >= guncel) / len(vals) * 100)
+    satir = _db().execute(
+        "SELECT fiyat, ts FROM okumalar WHERE urun = ? AND fiyat IS NOT NULL "
+        "ORDER BY fiyat ASC, ts ASC LIMIT 1", (urun,)).fetchone()
+    tum_dip, tum_dip_ts = (satir[0], satir[1][:10]) if satir else (None, "")
+    if guncel <= dip90 * 1.02:
+        sinyal = "🟢 dip bölgesi"
+    elif guncel <= medyan90:
+        sinyal = "🟡 ortalamanın altı"
+    else:
+        sinyal = "🔴 pahalı dönem"
+    return {"dip90": dip90, "medyan90": medyan90, "yuzde": yuzde,
+            "tum_dip": tum_dip, "tum_dip_tarih": tum_dip_ts,
+            "gun_sayisi": len(vals), "sinyal": sinyal}
+
+
 def baslat() -> None:
     """DB'yi açar (şema + gerekiyorsa CSV göçü). Bot açılışında çağrılır ki
     göç, ilk fiyat okumasını beklemeden yapılsın."""

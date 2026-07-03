@@ -21,7 +21,7 @@ from playwright.async_api import BrowserContext
 from . import konfig, veri
 from .bildirim import Notifier
 from .fiyat import kisa_tl, parse_try_amount, pct, tl
-from .izleyici import WatcherManager, grafik_png
+from .izleyici import WatcherManager, grafik_png, png_cek, set_toplamlari
 from .tarayici import akakce_ara, check_once
 from .veri import State
 
@@ -32,6 +32,7 @@ YARDIM = ("🛒 Ürün eklemek için ürün linkini DİREKT GÖNDER yeter —\n"
           "fiyatı okur, hedefi butonla seçtiririm.\n\n"
           "/durum — tüm ürünler, tıklanabilir (sorunlular üstte)\n"
           "/sorunlu — sadece okunamayan/engelli ürünler\n"
+          "/setler — ürün grupları: canlı toplam + set hedefi (PC toplama!)\n"
           "/grafik — fiyat grafiği (PNG + HTML)\n"
           "/csv — ham fiyat geçmişi\n\n"
           "İpucu: ürün adı yaz (örn: 'kingston') → kartı direkt açılır.\n"
@@ -40,6 +41,7 @@ YARDIM = ("🛒 Ürün eklemek için ürün linkini DİREKT GÖNDER yeter —\n"
 
 KOMUTLAR = [
     {"command": "durum", "description": "Tüm ürünler — tıklanabilir liste"},
+    {"command": "setler", "description": "Ürün grupları: canlı toplam + set hedefi"},
     {"command": "sorunlu", "description": "Sadece okunamayan/engelli ürünler"},
     {"command": "grafik", "description": "Fiyat grafiği (PNG + HTML)"},
     {"command": "csv", "description": "Ham fiyat geçmişi dosyası"},
@@ -183,6 +185,8 @@ def durum_gorunumu(products: list[dict], state: State, sayfa: int = 0,
         alt.append({"text": f"⚠️ Sorunlular ({len(sorunlu)})", "callback_data": "sor|0"})
     if sadece_sorunlu:
         alt.append({"text": "⬅️ Tüm liste", "callback_data": "d|0"})
+    if konfig.setleri_getir():
+        alt.append({"text": "📦 Setler", "callback_data": "setler"})
     alt.append({"text": "📈 Grafik", "callback_data": "grftum"})
     rows.append(alt)
 
@@ -235,6 +239,9 @@ def kart_gorunumu(p: dict, st: dict) -> tuple[str, list]:
     sorun = sorun_metni(p, st)
     if sorun:
         satirlar.append(f"⚠️ {sorun}")
+    if st.get("olu_kaynaklar"):
+        satirlar.append(f"🔗 {len(st['olu_kaynaklar'])} kaynak ÖLÜ (sayfa "
+                        "kaldırılmış) — ➕ ile yenisini ekle")
 
     fiyat_s = f"💰 {tl(fp)}" + (f" ({host})" if host else "")
     if thr:
@@ -242,7 +249,25 @@ def kart_gorunumu(p: dict, st: dict) -> tuple[str, list]:
         if fp:
             kalan = fp - float(thr)
             fiyat_s += " · HEDEFTE 🔥" if kalan <= 0 else f" ({kisa_tl(kalan)} kaldı)"
+    thr2 = p.get("price_threshold2_tl")
+    if thr2:
+        fiyat_s += f" · 🚨 {kisa_tl(float(thr2))}"
     satirlar.append(fiyat_s)
+
+    # "Bu iyi bir fiyat mı?" bağlamı (veri.db'den; 5+ günlük veri gerekir)
+    baglam = veri.fiyat_baglami(label, fp) if fp else None
+    if baglam:
+        satirlar.append(f"📊 {baglam['sinyal']} · 90g dip {kisa_tl(baglam['dip90'])}"
+                        f" · medyan {kisa_tl(baglam['medyan90'])}"
+                        f" · günlerin %{baglam['yuzde']}'inden ucuz")
+        if baglam["tum_dip"] is not None:
+            satirlar.append(f"🏆 Tüm zamanlar dibi: {kisa_tl(baglam['tum_dip'])}"
+                            f" ({baglam['tum_dip_tarih']})")
+
+    uyesi = [ad for ad, s in konfig.setleri_getir().items()
+             if key in s.get("urunler", [])]
+    if uyesi:
+        satirlar.append("📦 Set: " + ", ".join(uyesi))
 
     dip, gun_sayisi = veri.dip30_oncesi(st)
     d7 = veri.yedi_gun_degisim(st)
@@ -271,10 +296,11 @@ def kart_gorunumu(p: dict, st: dict) -> tuple[str, list]:
          {"text": "🔍 Akakçe'ye bağla", "callback_data": f"akk|{kid}"}],
         [duraklat,
          {"text": "➕ Kaynak ekle", "callback_data": f"kaynak|{kid}"}],
-        [{"text": "📈 Grafiği", "callback_data": f"grf|{kid}"},
-         {"text": "🗑 Sil", "callback_data": f"sil|{kid}"}],
-        [{"text": "⬅️ Liste", "callback_data": "d|0"},
-         {"text": "🛒 Ürüne git", "url": urls[0]}],
+        [{"text": "📦 Sete ekle", "callback_data": f"setsec|{kid}"},
+         {"text": "📈 Grafiği", "callback_data": f"grf|{kid}"}],
+        [{"text": "🗑 Sil", "callback_data": f"sil|{kid}"},
+         {"text": "⬅️ Liste", "callback_data": "d|0"}],
+        [{"text": "🛒 Ürüne git", "url": urls[0]}],
     ]
     return "\n".join(satirlar), rows
 
@@ -285,17 +311,101 @@ def hedef_secim_gorunumu(p: dict, st: dict) -> tuple[str, list]:
     kid = kisa_id(key)
     fp = st.get("last_good_price")
     thr = p.get("price_threshold_tl")
+    thr2 = p.get("price_threshold2_tl")
     metin = (f"🎯 {p.get('label', '?')}\n"
              f"Mevcut hedef: {tl(float(thr)) if thr else '—'}"
-             + (f" · güncel fiyat: {tl(fp)}" if fp else ""))
+             + (f" · 🚨 acil: {tl(float(thr2))}" if thr2 else "")
+             + (f"\nGüncel fiyat: {tl(fp)}" if fp else ""))
     rows = []
     if fp:
         rows += [[{"text": f"%3 altı → {tl(round(fp*0.97))}", "callback_data": f"hpct|{kid}|3"}],
                  [{"text": f"%5 altı → {tl(round(fp*0.95))}", "callback_data": f"hpct|{kid}|5"}],
                  [{"text": f"%10 altı → {tl(round(fp*0.90))}", "callback_data": f"hpct|{kid}|10"}]]
     rows.append([{"text": "✍️ Elle yazacağım", "callback_data": f"helle|{kid}"},
-                 {"text": "⬅️ Kart", "callback_data": f"kart|{kid}"}])
+                 {"text": "🚨 Acil hedef", "callback_data": f"hacil|{kid}"}])
+    rows.append([{"text": "⬅️ Kart", "callback_data": f"kart|{kid}"}])
     return metin, rows
+
+
+# ===================== SET GÖRÜNÜMLERİ =====================
+
+def set_bul(sid: str) -> str | None:
+    for ad in konfig.setleri_getir():
+        if kisa_id(ad) == sid:
+            return ad
+    return None
+
+
+def setler_gorunumu(state: State) -> tuple[str, list]:
+    """Set listesi: her set bir buton (ad + üye sayısı + canlı toplam)."""
+    rows = []
+    for s in set_toplamlari(state):
+        eksik = "*" if s["eksik"] else ""
+        rows.append([{"text": f"📦 {s['ad']} ({len(s['uyeler'])}) — "
+                              f"{kisa_tl(s['toplam'])}{eksik}",
+                      "callback_data": f"set|{kisa_id(s['ad'])}"}])
+    if not rows:
+        return ("Henüz set yok. Ürün kartındaki 📦 Sete ekle butonuyla kur "
+                "(örn. 'PC Toplama').",
+                [[{"text": "⬅️ Liste", "callback_data": "d|0"}]])
+    rows.append([{"text": "⬅️ Liste", "callback_data": "d|0"}])
+    return "📦 Setlerin: (* = fiyatı okunamayan üye var)", rows
+
+
+def set_gorunumu(ad: str, products: list[dict], state: State) -> tuple[str, list]:
+    """Set kartı: canlı toplam + dünle kıyas + hedef + üyeler (fiyatlarıyla)."""
+    from datetime import date, timedelta
+    bilgi = next((s for s in set_toplamlari(state) if s["ad"] == ad), None)
+    if bilgi is None:
+        return "Bu set artık yok.", [[{"text": "⬅️ Setler", "callback_data": "setler"}]]
+    sid = kisa_id(ad)
+    satirlar = [f"📦 {ad} ({len(bilgi['uyeler'])} parça)"]
+    toplam_s = f"💰 TOPLAM: {tl(bilgi['toplam'])}"
+    if bilgi["eksik"]:
+        toplam_s += f" (+{len(bilgi['eksik'])} üye fiyatsız!)"
+    # dünle kıyas: tüm üyelerin dünkü günlük minimumu varsa
+    dun = (date.today() - timedelta(days=1)).isoformat()
+    dun_fiyatlar = [f for f in ((state.get(k).get("daily_min") or {}).get(dun)
+                                for k in bilgi["uyeler"]) if f is not None]
+    if len(dun_fiyatlar) == len(bilgi["uyeler"]) and not bilgi["eksik"]:
+        dun_toplam = sum(dun_fiyatlar)
+        if dun_toplam > 0:
+            d = (bilgi["toplam"] - dun_toplam) / dun_toplam * 100
+            toplam_s += f" · dün {kisa_tl(dun_toplam)} ({pct(d)})"
+    satirlar.append(toplam_s)
+    if bilgi["hedef"]:
+        fark = bilgi["toplam"] - float(bilgi["hedef"])
+        satirlar.append(f"🎯 Set hedefi: {tl(float(bilgi['hedef']))}"
+                        + (" · HEDEFTE 🔥" if fark <= 0 and not bilgi["eksik"]
+                           else f" ({kisa_tl(fark)} kaldı)"))
+    rows = []
+    for key in bilgi["uyeler"]:
+        p = next((q for q in products if konfig.product_key(q) == key), None)
+        if p is not None:
+            rows.append(urun_satiri(p, state.get(key)))
+    rows.append([{"text": "🎯 Set hedefi", "callback_data": f"sethedef|{sid}"},
+                 {"text": "📈 Toplam grafiği", "callback_data": f"setgrf|{sid}"}])
+    rows.append([{"text": "🗑 Seti sil", "callback_data": f"setsil|{sid}"},
+                 {"text": "⬅️ Setler", "callback_data": "setler"}])
+    return "\n".join(satirlar), rows
+
+
+def set_secim_gorunumu(p: dict) -> tuple[str, list]:
+    """Kart → 📦 Sete ekle: mevcut setler (üyeyse çıkarma), yeni set kurma."""
+    key = konfig.product_key(p)
+    kid = kisa_id(key)
+    rows = []
+    for ad, s in konfig.setleri_getir().items():
+        sid = kisa_id(ad)
+        if key in s.get("urunler", []):
+            rows.append([{"text": f"✓ {ad} — çıkar",
+                          "callback_data": f"setcik|{kid}|{sid}"}])
+        else:
+            rows.append([{"text": f"📦 {ad} — ekle",
+                          "callback_data": f"sete|{kid}|{sid}"}])
+    rows.append([{"text": "➕ Yeni set kur", "callback_data": f"setyeni|{kid}"},
+                 {"text": "⬅️ Kart", "callback_data": f"kart|{kid}"}])
+    return f"📦 {p.get('label', '?')} hangi sete?", rows
 
 
 def isim_ara(products: list[dict], sorgu: str) -> list[dict]:
@@ -492,21 +602,59 @@ async def _mesaj_isle(text: str, notifier: Notifier, shared: dict,
         return
 
     if text.lower() in ("iptal", "vazgeç", "vazgec"):
-        for k in ("bekleyen_urun", "bekleyen_hedef", "bekleyen_kaynak"):
+        for k in ("bekleyen_urun", "bekleyen_hedef", "bekleyen_kaynak",
+                  "bekleyen_set_hedef", "bekleyen_set_yeni"):
             shared.pop(k, None)
         await notifier.send("Vazgeçildi.")
         return
 
+    # yeni set kurma: yazılan metin set adıdır
+    bsy = shared.get("bekleyen_set_yeni")
+    if bsy:
+        ad = " ".join(text.split())[:40]
+        shared.pop("bekleyen_set_yeni", None)
+        konfig.set_urun(ad, bsy["key"])
+        metin, rows = set_gorunumu(ad, shared["products"], state)
+        await notifier.send_buttons(f"✅ 📦 '{ad}' kuruldu.\n\n" + metin, rows)
+        return
+
     sayi = parse_try_amount(text)
     bekleyen_hedef = shared.get("bekleyen_hedef")
-    if sayi and bekleyen_hedef:
+
+    bsh = shared.get("bekleyen_set_hedef")
+    if sayi and bsh:
+        ad = bsh["ad"]
+        shared.pop("bekleyen_set_hedef", None)
+        konfig.set_hedef(ad, sayi)
+        metin, rows = set_gorunumu(ad, shared["products"], state)
+        await notifier.send_buttons(
+            f"🎯 '{ad}' set hedefi: {tl(sayi)} — toplam bu rakamın altına "
+            "inince bildiririm.\n\n" + metin, rows)
+        return
+
+    # acil hedef kaldırma: '0'
+    if bekleyen_hedef and bekleyen_hedef.get("acil") and text.strip() == "0":
         key = bekleyen_hedef["key"]
         shared.pop("bekleyen_hedef", None)
-        konfig.tg_hedef_degistir(key, sayi)
+        konfig.tg_acil_hedef(key, None)
+        shared["products"] = konfig.load_products()
+        manager.sync(shared["products"], force={key})
+        await notifier.send(f"🚨 {key} acil hedefi kaldırıldı.")
+        return
+
+    if sayi and bekleyen_hedef:
+        key = bekleyen_hedef["key"]
+        acil = bool(bekleyen_hedef.get("acil"))
+        shared.pop("bekleyen_hedef", None)
+        if acil:
+            konfig.tg_acil_hedef(key, sayi)
+        else:
+            konfig.tg_hedef_degistir(key, sayi)
         _mute_temizle(state, key)
         shared["products"] = konfig.load_products()
         manager.sync(shared["products"], force={key})
-        await notifier.send(f"🎯 {key} yeni hedef: {tl(sayi)}")
+        onek = "🚨 acil hedef" if acil else "🎯 yeni hedef"
+        await notifier.send(f"{key} {onek}: {tl(sayi)}")
         return
     bekleyen = shared.get("bekleyen_urun")
     if sayi and bekleyen and bekleyen.get("elle"):
@@ -546,6 +694,10 @@ async def _komut_isle(text: str, notifier: Notifier, shared: dict, state: State,
 
     elif cmd == "/sorunlu":
         metin, rows = durum_gorunumu(products, state, sadece_sorunlu=True)
+        await notifier.send_buttons(metin, rows)
+
+    elif cmd in ("/setler", "/set"):
+        metin, rows = setler_gorunumu(state)
         await notifier.send_buttons(metin, rows)
 
     elif cmd == "/ekle":
@@ -671,6 +823,47 @@ async def _callback_isle(cb: dict, notifier: Notifier, shared: dict, state: Stat
             await notifier.send(f"Grafik üretilemedi: {e}")
         return
 
+    # --- set işlemleri (ürün korumasından bağımsız) ---
+    if islem == "setler":
+        metin, rows = setler_gorunumu(state)
+        await notifier.edit_buttons(mid, metin, rows)
+        return
+    if islem in ("set", "sethedef", "setgrf", "setsil", "setsilon"):
+        ad = set_bul(parca[1]) if len(parca) > 1 else None
+        if ad is None:
+            await notifier.edit_buttons(mid, "Bu set artık yok.",
+                                        [[{"text": "⬅️ Liste", "callback_data": "d|0"}]])
+            return
+        sid = kisa_id(ad)
+        if islem == "set":
+            metin, rows = set_gorunumu(ad, products, state)
+            await notifier.edit_buttons(mid, metin, rows)
+        elif islem == "sethedef":
+            shared["bekleyen_set_hedef"] = {"ad": ad}
+            await notifier.send(f"🎯 '{ad}' seti için TOPLAM hedef fiyatı yaz "
+                                "(örn: 84000), vazgeçmek için 'iptal':")
+        elif islem == "setgrf":
+            try:
+                import grafik
+                s = konfig.setleri_getir()[ad]
+                seri = veri.set_toplam_serisi(s.get("urunler", []))
+                html = grafik.generate_set(ad, seri, s.get("hedef"))
+                png = await png_cek(context, html)
+                await notifier.send_photo(png, f"📦 {ad} — set toplamı")
+            except Exception as e:
+                await notifier.send(f"Set grafiği üretilemedi: {e}")
+        elif islem == "setsil":
+            await notifier.edit_buttons(
+                mid, f"🗑 '{ad}' seti silinsin mi? (ürünler silinmez, "
+                     "sadece gruplama kalkar)",
+                [[{"text": "Evet, sil", "callback_data": f"setsilon|{sid}"},
+                  {"text": "Vazgeç", "callback_data": f"set|{sid}"}]])
+        elif islem == "setsilon":
+            konfig.set_sil(ad)
+            metin, rows = setler_gorunumu(state)
+            await notifier.edit_buttons(mid, f"🗑 '{ad}' seti silindi.\n\n" + metin, rows)
+        return
+
     # --- ürün bazlı işlemler (kid ile) ---
     kid = parca[1] if len(parca) > 1 else ""
 
@@ -725,6 +918,36 @@ async def _callback_isle(cb: dict, notifier: Notifier, shared: dict, state: Stat
         shared["bekleyen_hedef"] = {"key": key}
         await notifier.send(f"🎯 {p.get('label', '?')} için yeni hedefi yaz "
                             "(örn: 13500), vazgeçmek için 'iptal':")
+
+    elif islem == "hacil":
+        shared["bekleyen_hedef"] = {"key": key, "acil": True}
+        await notifier.send(
+            f"🚨 {p.get('label', '?')} için ACİL hedefi yaz (örn: 12000).\n"
+            "Bu eşiğin altında: cooldown beklenmez, sessiz saati deler.\n"
+            "Kaldırmak için '0', vazgeçmek için 'iptal':")
+
+    elif islem == "setsec":
+        metin, rows = set_secim_gorunumu(p)
+        await notifier.edit_buttons(mid, metin, rows)
+
+    elif islem in ("sete", "setcik"):
+        ad = set_bul(parca[2]) if len(parca) > 2 else None
+        if ad is None:
+            await notifier.send("Bu set artık yok.")
+            return
+        konfig.set_urun(ad, key, ekle=(islem == "sete"))
+        if islem == "sete":
+            metin, rows = set_gorunumu(ad, products, state)
+            await notifier.edit_buttons(
+                mid, f"✅ '{p.get('label', '?')}' → 📦 {ad}\n\n" + metin, rows)
+        else:
+            await _kart_guncelle(p)
+
+    elif islem == "setyeni":
+        shared["bekleyen_set_yeni"] = {"key": key}
+        await notifier.send(f"📦 Yeni set adı yaz (örn: PC Toplama) — "
+                            f"'{p.get('label', '?')}' ilk üye olacak. "
+                            "Vazgeçmek için 'iptal':")
 
     elif islem == "akk":
         await _akakce_akisi(manager, notifier, shared, p, mid)

@@ -31,6 +31,12 @@ BLOCK_MARKERS = [
 
 AKAKCE_ARAMA = "https://www.akakce.com/arama/?q={}"
 
+# Ölü ürün sayfası işaretleri (başlıkta aranır; 404/410 durum koduna ek olarak)
+DEAD_MARKERS = [
+    "sayfa bulunamadı", "aradığınız sayfa", "ürün bulunamadı",
+    "page not found", "üzgünüz",
+]
+
 # Kuyruk beklemesi bunu aşacaksa kontrol ERTELENİR (bu tur atlanır). Eski
 # davranışta izleyici, cezalı hostun sırasında semaforu tutarak 60 dk'ya kadar
 # uyuyabiliyordu; 3 slotun üçü de cezalı hosta denk gelince TÜM bot saatlerce
@@ -412,7 +418,8 @@ async def check_once(context: BrowserContext, sites: Sites, throttle: HostThrott
     strat = sites.strategy(host)
     sonuc: dict = {"url": url, "host": host.replace("www.", ""),
              "price": None, "source": "yok", "seller": None, "title": "",
-             "in_stock": None, "variant_ok": True, "variant": "AUTO", "blocked": False}
+             "in_stock": None, "variant_ok": True, "variant": "AUTO",
+             "blocked": False, "dead": False}
 
     bekleme = throttle.tahmini_bekleme(host)
     if bekleme > MAX_KUYRUK_BEKLEME:
@@ -427,8 +434,10 @@ async def check_once(context: BrowserContext, sites: Sites, throttle: HostThrott
         page = await context.new_page()
         try:
             await apply_stealth(page)
+            yanit = None
             try:
-                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                yanit = await page.goto(url, wait_until="domcontentloaded",
+                                        timeout=45000)
             except PWTimeout:
                 logging.warning(f"[{prod.get('label')}] sayfa yükleme zaman aşımı, "
                                 "mevcut haliyle okunuyor...")
@@ -438,6 +447,16 @@ async def check_once(context: BrowserContext, sites: Sites, throttle: HostThrott
                 sonuc["title"] = (await page.title() or "").strip()
             except Exception:
                 pass
+
+            # Ölü link: 404/410 veya "sayfa bulunamadı" başlığı → kaynak kalkmış.
+            # Sessizce "fiyat yok" görünmek yerine açıkça işaretlenir; izleyici
+            # haftada bir uyarır, kartta da görünür.
+            if (yanit is not None and yanit.status in (404, 410)) or any(
+                    m in sonuc["title"].lower() for m in DEAD_MARKERS):
+                sonuc["dead"] = True
+                logging.warning(f"[{prod.get('label')}] ölü kaynak "
+                                f"(HTTP {yanit.status if yanit else '?'}): {url}")
+                return sonuc
 
             if await detect_block(page):
                 sonuc["blocked"] = True

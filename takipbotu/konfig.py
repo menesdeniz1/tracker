@@ -66,10 +66,13 @@ def load_products() -> list[dict]:
     hedefler = tg.get("hedefler") or {}
     kaynaklar = tg.get("ek_kaynaklar") or {}
     duraklatilan = set(tg.get("duraklatilan") or [])
+    acil = tg.get("acil_hedefler") or {}
     for p in products:
         k = product_key(p)
         if k in hedefler:
             p["price_threshold_tl"] = float(hedefler[k])
+        if k in acil:
+            p["price_threshold2_tl"] = float(acil[k])
         # /akakce ile bağlanan ek kaynaklar LİSTENİN BAŞINA gelir (Akakçe birincil)
         if k in kaynaklar:
             ek = [u for u in kaynaklar[k] if u]
@@ -86,7 +89,53 @@ def _tg_dosya() -> dict:
     d.setdefault("hedefler", {})
     d.setdefault("ek_kaynaklar", {})
     d.setdefault("duraklatilan", [])
+    # setler: {"PC Toplama": {"urunler": [key...], "hedef": 84000.0}}
+    d.setdefault("setler", {})
+    # acil_hedefler: {key: fiyat} — ikinci eşik (🚨 kısa cooldown, sessiz saati deler)
+    d.setdefault("acil_hedefler", {})
     return d
+
+
+def tg_acil_hedef(key: str, hedef: float | None) -> None:
+    d = _tg_dosya()
+    if hedef is None:
+        d["acil_hedefler"].pop(key, None)
+    else:
+        d["acil_hedefler"][key] = hedef
+    save_yaml_atomic(TELEGRAM_URUNLER, d)
+
+
+# ===================== SETLER (ürün grupları) =====================
+
+def setleri_getir() -> dict:
+    """{set adı: {"urunler": [...], "hedef": float|None}}"""
+    return _tg_dosya()["setler"]
+
+
+def set_urun(set_adi: str, key: str, ekle: bool = True) -> None:
+    """Ürünü sete ekler/çıkarır; set yoksa oluşturur, boşalırsa siler."""
+    d = _tg_dosya()
+    s = d["setler"].setdefault(set_adi, {"urunler": [], "hedef": None})
+    if ekle and key not in s["urunler"]:
+        s["urunler"].append(key)
+    if not ekle and key in s["urunler"]:
+        s["urunler"].remove(key)
+    if not s["urunler"]:
+        d["setler"].pop(set_adi, None)
+    save_yaml_atomic(TELEGRAM_URUNLER, d)
+
+
+def set_hedef(set_adi: str, hedef: float | None) -> None:
+    d = _tg_dosya()
+    if set_adi in d["setler"]:
+        d["setler"][set_adi]["hedef"] = hedef
+        save_yaml_atomic(TELEGRAM_URUNLER, d)
+
+
+def set_sil(set_adi: str) -> None:
+    d = _tg_dosya()
+    d["setler"].pop(set_adi, None)
+    save_yaml_atomic(TELEGRAM_URUNLER, d)
 
 
 def tg_kaynak_ekle(key: str, url: str) -> None:
@@ -120,8 +169,16 @@ def tg_urun_sil(key: str) -> None:
         d["kaldirilan"].append(key)
     d["hedefler"].pop(key, None)
     d["ek_kaynaklar"].pop(key, None)
+    d["acil_hedefler"].pop(key, None)
     if key in d["duraklatilan"]:
         d["duraklatilan"].remove(key)
+    # setlerden de düş (boşalan set silinir)
+    for ad in list(d["setler"]):
+        s = d["setler"][ad]
+        if key in s.get("urunler", []):
+            s["urunler"].remove(key)
+            if not s["urunler"]:
+                d["setler"].pop(ad)
     save_yaml_atomic(TELEGRAM_URUNLER, d)
 
 
