@@ -176,6 +176,31 @@ def test_set_toplam_bildirimi(tmp_path, monkeypatch):
     assert len(n.mesajlar) == 1
 
 
+def test_tg_ayri_yoklama_baglantisi():
+    """getUpdates verilen ayrı bağlantıyı kullanmalı; diğer çağrılar ana
+    bağlantıyı. (Yoklamanın buton/edit istekleriyle çakışmasını önler.)"""
+    from takipbotu.bildirim import Notifier
+
+    class FakeCtx:
+        def __init__(self):
+            self.cagrildi = False
+
+        async def post(self, url, data=None, timeout=None):
+            self.cagrildi = True
+
+            class R:
+                async def json(self_inner):
+                    return {"ok": True, "result": "x"}
+            return R()
+
+    ana, poll = FakeCtx(), FakeCtx()
+    n = Notifier(ana, {"telegram_bot_token": "t"})
+    asyncio.run(n.tg("getUpdates", rq=poll))
+    assert poll.cagrildi and not ana.cagrildi        # yoklama ayrı bağlantıda
+    asyncio.run(n.tg("sendMessage"))
+    assert ana.cagrildi                              # gönderim ana bağlantıda
+
+
 # ---------- karar: ölü kaynak elenir ----------
 
 def test_olu_kaynak_elenir():

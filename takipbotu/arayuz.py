@@ -613,19 +613,26 @@ def _gorev_sonucu_logla(gorev: asyncio.Task) -> None:
         logging.error(f"Telegram update işlenemedi: {type(e).__name__}: {e}")
 
 async def telegram_listener(notifier: Notifier, shared: dict, state: State,
-                            manager: WatcherManager, context: BrowserContext) -> None:
+                            manager: WatcherManager, context: BrowserContext,
+                            poll_rq=None) -> None:
     """Uzun sorgulamayla (getUpdates) komut + buton dinler. Sadece ayarlı
-    chat_id'den gelenler işlenir; yabancı sohbetler yok sayılır."""
+    chat_id'den gelenler işlenir; yabancı sohbetler yok sayılır.
+
+    poll_rq: getUpdates için AYRI bağlantı bağlamı — hızlı buton/edit
+    istekleriyle çakışmasın (yoklama takılınca butonlar cevapsız kalıyordu).
+    Yoklama kısa tutulur (25 sn sunucu / 30 sn istemci): bağlantı stall olursa
+    en geç ~30 sn'de bırakılıp yeniden yoklanır, bekleyen buton hemen alınır.
+    Hatada 10 değil 2 sn beklenir → ölü pencere en aza iner."""
     if not notifier.token:
         return
     await notifier.tg("setMyCommands", commands=KOMUTLAR)   # "/" menüsü
     offset = 0
     while True:
         try:
-            updates = await notifier.tg("getUpdates", timeout_ms=65000,
-                                        offset=offset, timeout=50)
+            updates = await notifier.tg("getUpdates", timeout_ms=30000,
+                                        rq=poll_rq, offset=offset, timeout=25)
             if updates is None:
-                await asyncio.sleep(10)
+                await asyncio.sleep(2)
                 continue
             for u in updates:
                 offset = u["update_id"] + 1
@@ -639,7 +646,7 @@ async def telegram_listener(notifier: Notifier, shared: dict, state: State,
             raise
         except Exception as e:
             logging.warning(f"Telegram dinleyici hatası: {e}")
-            await asyncio.sleep(10)
+            await asyncio.sleep(2)
 
 
 async def _update_isle(u: dict, notifier: Notifier, shared: dict, state: State,

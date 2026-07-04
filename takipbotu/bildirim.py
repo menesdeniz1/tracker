@@ -23,13 +23,16 @@ class Notifier:
     def api(self) -> str:
         return f"https://api.telegram.org/bot{self.token}"
 
-    async def tg(self, method: str, timeout_ms: int = 30000, **params):
-        """Telegram API çağrısı. Başarıda 'result' döner, hatada None."""
+    async def tg(self, method: str, timeout_ms: int = 30000, rq=None, **params):
+        """Telegram API çağrısı. Başarıda 'result' döner, hatada None.
+        rq verilirse o ayrı bağlantı bağlamı kullanılır — uzun süren getUpdates
+        yoklaması, hızlı buton/edit istekleriyle aynı havuzu paylaşıp birbirini
+        aç bırakmasın diye (aksi halde yoklama takılınca butonlar cevapsız kalır)."""
         if not self.token:
             return None
         try:
-            resp = await self.rq.post(f"{self.api}/{method}", data=params,
-                                      timeout=timeout_ms)
+            resp = await (rq or self.rq).post(f"{self.api}/{method}", data=params,
+                                              timeout=timeout_ms)
             js = await resp.json()
             if not js.get("ok"):
                 logging.warning(f"Telegram {method} hatası: {js.get('description')}")

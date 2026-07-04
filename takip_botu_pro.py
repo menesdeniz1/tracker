@@ -76,6 +76,9 @@ async def main() -> None:
 
     async with async_playwright() as p:
         rq = await p.request.new_context()
+        # getUpdates uzun-yoklaması için AYRI bağlantı: buton/edit istekleriyle
+        # aynı havuzu paylaşıp birbirini aç bırakmasın (arayüz donmasın)
+        rq_poll = await p.request.new_context()
         notifier = Notifier(rq, settings)
         await notifier.check_bot()
         # Telegram sayesinde QR/oturum derdi yok → varsayılan headless
@@ -101,8 +104,8 @@ async def main() -> None:
         hb = asyncio.create_task(izleyici.heartbeat(notifier, settings, shared,
                                                     state, context))
         yd = asyncio.create_task(izleyici.yedek_dongusu(notifier, state, settings))
-        lst = asyncio.create_task(arayuz.telegram_listener(notifier, shared, state,
-                                                           manager, context))
+        lst = asyncio.create_task(arayuz.telegram_listener(
+            notifier, shared, state, manager, context, poll_rq=rq_poll))
         logging.info(f"{len(products)} ürün izleniyor. Durdurmak için Ctrl+C. "
                      "Telegram'dan /durum yazabilirsin.")
         try:
@@ -117,6 +120,7 @@ async def main() -> None:
             await asyncio.gather(*izleyiciler, hb, yd, lst, return_exceptions=True)
             await context.close()
             await rq.dispose()
+            await rq_poll.dispose()
 
 
 async def run_once() -> None:
