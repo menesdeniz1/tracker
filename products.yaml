@@ -294,6 +294,39 @@ products:
     sleep_min: 1800
     sleep_max: 3600
 
+  # ---- Toplama listesi alternatifleri (Temmuz 2026'da eklendi) ----
+  - label: "Patriot Viper Venom 32GB (2x16) DDR5 6000 CL30"
+    url: "https://www.hepsiburada.com/patriot-patriot-viper-venom-32gb-2x16gb-ddr5-6000mhz-cl30-gaming-ram-bellek-pvv532g600c30k-p-HBCV00006OXN4L"
+    mode: price
+    price_threshold_tl: 27500
+    cooldown_minutes: 1440
+    sleep_min: 1800
+    sleep_max: 3600
+
+  - label: "WD Black SN850X 2TB NVMe SSD"
+    url: "https://www.n11.com/urun/wd-wds200t2x0e-2-tb-sn850x-nvme-73006600-ssd-65848636"
+    mode: price
+    price_threshold_tl: 16000
+    cooldown_minutes: 1440
+    sleep_min: 1800
+    sleep_max: 3600
+
+  - label: "Inno3D RTX 5070 Ti X3 OC 16GB"
+    url: "https://www.gamer.gen.tr/inno3d-geforce-rtx-5070-ti-x3-oc-16gb-gddr7-256bit-dlss-4-ekran-karti_u51657"
+    mode: price
+    price_threshold_tl: 46000
+    cooldown_minutes: 1440
+    sleep_min: 1800
+    sleep_max: 3600
+
+  - label: "AGI Turbojet UD858 32GB (2x16) DDR5 6000 CL30"
+    url: "https://www.pttavm.com/agi-turbolet-ud858-ddr5-turbojet-rgb-32-gb-2x16-6000-mt-s-cl30-beyaz-p-1436949472"
+    mode: price
+    price_threshold_tl: 2600
+    cooldown_minutes: 1440
+    sleep_min: 1800
+    sleep_max: 3600
+
   # ---- ÖRNEK: eski stock-bot'taki gibi beden/stok takibi (kapalı) ----
   - label: "Örnek Ayakkabı 42 Numara"
     url: "https://ornek-site.com/urun/ayakkabi"
