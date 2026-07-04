@@ -210,6 +210,62 @@ def test_cb_durum_listesi(ortam):
     assert any(r[0]["callback_data"].startswith("kart|") for r in rows)
 
 
+# ===================== GEZİNME (menü + bağlamsal geri) =====================
+
+def test_ana_menu_gorunumu(tmp_path):
+    from takipbotu.arayuz import ana_menu_gorunumu
+    state = veri.State(tmp_path / "s.json")
+    products = [{"label": "A"}, {"label": "B"}]
+    metin, rows = ana_menu_gorunumu(products, state)
+    datalar = [b["callback_data"] for r in rows for b in r if "callback_data" in b]
+    assert "Ana Menü" in metin
+    assert "d|0" in datalar and "setler" in datalar and "grftum" in datalar
+    assert "yardim" in datalar
+
+
+def test_urun_satiri_origin_kodlar():
+    from takipbotu.arayuz import urun_satiri
+    r = urun_satiri({"label": "X"}, {}, "s abc")  # boşluk olmaz ama format testi
+    assert r[0]["callback_data"].startswith("kart|")
+    r2 = urun_satiri({"label": "X"}, {}, "sABC123")
+    assert r2[0]["callback_data"].endswith("|sABC123")   # set origin taşınır
+
+
+def test_kart_baglamsal_geri():
+    from takipbotu.arayuz import kart_gorunumu
+    p = {"label": "X", "url": "http://a"}
+    _, rows = kart_gorunumu(p, {"last_good_price": 100.0}, geri_cb="set|abc123")
+    # son satır nav: [⬅️ Geri→set] [🏠 Menü]
+    nav = rows[-1]
+    assert nav[0]["callback_data"] == "set|abc123"
+    assert nav[-1]["callback_data"] == "menu"
+
+
+def test_cb_menu_ve_yardim(ortam):
+    n, m, state, shared = ortam
+    _isle(_cb("menu"), n, shared, state, m)
+    assert "Ana Menü" in n.gonderilen[-1][1]
+    _isle(_cb("yardim"), n, shared, state, m)
+    assert n.gonderilen[-1][0] == "edit"
+
+
+def test_cb_kart_setten_gelince_geri_sete_doner(ortam):
+    """Setten açılan kartın 'geri'si sete döner (kullanıcının asıl istediği)."""
+    n, m, state, shared = ortam
+    kid = kisa_id("Urun A")
+    sid = kisa_id("PC")
+    konfig.set_urun("PC", "Urun A")
+    shared["products"] = konfig.load_products()
+    # setten kart aç: kart|kid|s<sid>
+    _isle(_cb(f"kart|{kid}|s{sid}"), n, shared, state, m)
+    _, _, rows = n.gonderilen[-1]
+    nav = rows[-1]
+    assert nav[0]["callback_data"] == f"set|{sid}"       # sete döner
+    # listeden aç: geri listeye
+    _isle(_cb(f"kart|{kid}|d"), n, shared, state, m)
+    assert n.gonderilen[-1][2][-1][0]["callback_data"] == "d|0"
+
+
 def test_cb_kart_acilir(ortam):
     n, m, state, shared = ortam
     _isle(_cb(f"kart|{kisa_id('Urun A')}"), n, shared, state, m)

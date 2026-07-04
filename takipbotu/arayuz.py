@@ -28,18 +28,17 @@ from .veri import State
 SAYFA_BOYU = 8
 BARLAR = "▁▂▃▄▅▆▇█"
 
-YARDIM = ("🛒 Ürün eklemek için ürün linkini DİREKT GÖNDER yeter —\n"
-          "fiyatı okur, hedefi butonla seçtiririm.\n\n"
-          "/durum — tüm ürünler, tıklanabilir (sorunlular üstte)\n"
-          "/sorunlu — sadece okunamayan/engelli ürünler\n"
-          "/setler — ürün grupları: canlı toplam + set hedefi (PC toplama!)\n"
-          "/grafik — fiyat grafiği (PNG + HTML)\n"
-          "/csv — ham fiyat geçmişi\n\n"
-          "İpucu: ürün adı yaz (örn: 'kingston') → kartı direkt açılır.\n"
-          "Karttan hedef değiştirme, Akakçe'ye bağlama, duraklatma,\n"
-          "silme (geri al'lı) — hepsi butonla, numara ezberi yok.")
+YARDIM = ("🏠 /menu yaz — gerisini butonlarla yürüt. Her ekranın altında\n"
+          "[⬅️ Geri] [🏠 Menü] var; komut ezberlemene gerek yok.\n\n"
+          "🛒 Ürün eklemek: linkini DİREKT GÖNDER — fiyatı okur, hedefi\n"
+          "butonla seçtiririm.\n"
+          "🔎 Ürün adı yaz (örn: 'kingston') → kartı direkt açılır.\n\n"
+          "Menüden: 📊 Durum · ⚠️ Sorunlular · 📦 Setler · 📈 Grafik.\n"
+          "Karttan: hedef/acil hedef, Akakçe'ye bağla, sete ekle, duraklat,\n"
+          "sil (geri al'lı) — hepsi butonla.")
 
 KOMUTLAR = [
+    {"command": "menu", "description": "🏠 Ana menü — her şeye buradan"},
     {"command": "durum", "description": "Tüm ürünler — tıklanabilir liste"},
     {"command": "setler", "description": "Ürün grupları: canlı toplam + set hedefi"},
     {"command": "sorunlu", "description": "Sadece okunamayan/engelli ürünler"},
@@ -78,6 +77,47 @@ def urun_bul(products: list[dict], kid: str) -> dict | None:
     return None
 
 
+# ===================== GEZİNME (profesyonel bot iskeleti) =====================
+# Her ekran mesajı YERİNDE güncellenir (editMessageText) ve altında standart
+# gezinme satırı taşır: [⬅️ Geri] [🏠 Menü]. "Geri" bağlamsaldır — karta setten
+# gelindiyse sete, listeden gelindiyse listeye döner (kaynak callback_data'da
+# taşınır, shared'de saklanır). Böylece bir kez /menu yazılır, gerisi butonla.
+
+def _nav(geri_cb: str | None) -> list[dict]:
+    """Ekran altı gezinme satırı. geri_cb None ise sadece 🏠 Menü."""
+    row = []
+    if geri_cb:
+        row.append({"text": "⬅️ Geri", "callback_data": geri_cb})
+    row.append({"text": "🏠 Menü", "callback_data": "menu"})
+    return row
+
+
+def _kart_geri(shared: dict, kid: str) -> str:
+    """Kartın 'geri' hedefi: karta nereden gelindiyse oraya döner."""
+    ori = (shared.get("kart_ori") or {}).get(kid, "d")
+    if ori == "sor":
+        return "sor|0"
+    if ori.startswith("s") and len(ori) > 1:
+        return f"set|{ori[1:]}"
+    return "d|0"
+
+
+def ana_menu_gorunumu(products: list[dict], state: State) -> tuple[str, list]:
+    """🏠 Ana menü — her şeyin buton olduğu tek giriş ekranı."""
+    sorunlu = sum(1 for p in products
+                  if sorun_metni(p, state.get(konfig.product_key(p))))
+    setler = konfig.setleri_getir()
+    rows = [[{"text": f"📊 Durum ({len(products)})", "callback_data": "d|0"}]]
+    if sorunlu:
+        rows.append([{"text": f"⚠️ Sorunlular ({sorunlu})", "callback_data": "sor|0"}])
+    rows.append([{"text": f"📦 Setler ({len(setler)})", "callback_data": "setler"},
+                 {"text": "📈 Grafik", "callback_data": "grftum"}])
+    rows.append([{"text": "❓ Yardım", "callback_data": "yardim"}])
+    metin = ("🏠 Ana Menü — ne yapmak istersin?\n"
+             "İpucu: ürün linki gönder → eklerim · ürün adı yaz → kartı açılır")
+    return metin, rows
+
+
 # ===================== GÖRÜNÜM KURUCULAR (saf — testlenebilir) =====================
 
 def sorun_metni(p: dict, st: dict) -> str | None:
@@ -105,12 +145,13 @@ def _kisa_yas(st: dict) -> str:
     return f"{saat/24:.0f}g" if saat > 48 else f"{saat:.0f}s"
 
 
-def urun_satiri(p: dict, st: dict) -> list[dict]:
+def urun_satiri(p: dict, st: dict, ori: str = "d") -> list[dict]:
     """Durum listesindeki İKİ sütunlu ürün satırı: sol=ad, sağ=fiyat/durum.
     Telefonda tek uzun buton kırpılıp fiyatı yutuyordu; iki sütunda fiyat
-    HER ZAMAN görünür. İki buton da aynı kartı açar."""
+    HER ZAMAN görünür. İki buton da aynı kartı açar. ori = kartın 'nereden
+    gelindiği' işareti (d=liste, sor=sorunlu, s<sid>=set) → bağlamsal geri."""
     kid = kisa_id(konfig.product_key(p))
-    cb = f"kart|{kid}"
+    cb = f"kart|{kid}|{ori}"
     label = p.get("label", "?")
     if p.get("paused"):
         sag = "⏸ durdu"
@@ -164,9 +205,10 @@ def durum_gorunumu(products: list[dict], state: State, sayfa: int = 0,
             + (f" · ⏸ {len(duraklatilmis)}" if duraklatilmis else ""))
 
     havuz = _sirala(sorunlu if sadece_sorunlu else products, state)
+    on_ek = "sor" if sadece_sorunlu else "d"
     if sadece_sorunlu and not havuz:
         return ("✅ Sorunlu ürün yok — her şey okunuyor.",
-                [[{"text": "⬅️ Tüm liste", "callback_data": "d|0"}]])
+                [_nav("d|0")])
 
     toplam_sayfa = max(1, (len(havuz) + SAYFA_BOYU - 1) // SAYFA_BOYU)
     sayfa = max(0, min(sayfa, toplam_sayfa - 1))
@@ -174,8 +216,7 @@ def durum_gorunumu(products: list[dict], state: State, sayfa: int = 0,
 
     rows = []
     for p in dilim:
-        rows.append(urun_satiri(p, state.get(konfig.product_key(p))))
-    on_ek = "sor" if sadece_sorunlu else "d"
+        rows.append(urun_satiri(p, state.get(konfig.product_key(p)), on_ek))
     if toplam_sayfa > 1:
         rows.append([{"text": "◀️", "callback_data": f"{on_ek}|{sayfa-1}"},
                      {"text": f"{sayfa+1}/{toplam_sayfa}", "callback_data": f"{on_ek}|{sayfa}"},
@@ -183,12 +224,13 @@ def durum_gorunumu(products: list[dict], state: State, sayfa: int = 0,
     alt = []
     if not sadece_sorunlu and sorunlu:
         alt.append({"text": f"⚠️ Sorunlular ({len(sorunlu)})", "callback_data": "sor|0"})
-    if sadece_sorunlu:
-        alt.append({"text": "⬅️ Tüm liste", "callback_data": "d|0"})
     if konfig.setleri_getir():
         alt.append({"text": "📦 Setler", "callback_data": "setler"})
     alt.append({"text": "📈 Grafik", "callback_data": "grftum"})
     rows.append(alt)
+    # sorunlu görünümde geri = tüm liste; ana listede geri = menü
+    rows.append(_nav("d|0") if sadece_sorunlu else [{"text": "🏠 Menü",
+                                                     "callback_data": "menu"}])
 
     baslik = "⚠️ Sorunlu ürünler:" if sadece_sorunlu else ozet
     return baslik + "\n(ürüne dokun → kart açılır)", rows
@@ -224,8 +266,9 @@ def _sure_metni(ts: float | None) -> str:
     return f"{dk/1440:.0f} gün önce"
 
 
-def kart_gorunumu(p: dict, st: dict) -> tuple[str, list]:
-    """Ürün kartı: tüm bilgi + tüm işlemler tek ekranda."""
+def kart_gorunumu(p: dict, st: dict, geri_cb: str = "d|0") -> tuple[str, list]:
+    """Ürün kartı: tüm bilgi + tüm işlemler tek ekranda. geri_cb = bağlamsal
+    geri hedefi (setten gelindiyse sete, listeden gelindiyse listeye)."""
     key = konfig.product_key(p)
     kid = kisa_id(key)
     label = p.get("label", "?")
@@ -310,8 +353,8 @@ def kart_gorunumu(p: dict, st: dict) -> tuple[str, list]:
         [{"text": "📦 Sete ekle", "callback_data": f"setsec|{kid}"},
          {"text": "📈 Grafiği", "callback_data": f"grf|{kid}"}],
         [{"text": "🗑 Sil", "callback_data": f"sil|{kid}"},
-         {"text": "⬅️ Liste", "callback_data": "d|0"}],
-        [{"text": "🛒 Ürüne git", "url": urls[0]}],
+         {"text": "🛒 Ürüne git", "url": urls[0]}],
+        _nav(geri_cb),
     ]
     return "\n".join(satirlar), rows
 
@@ -334,7 +377,7 @@ def hedef_secim_gorunumu(p: dict, st: dict) -> tuple[str, list]:
                  [{"text": f"%10 altı → {tl(round(fp*0.90))}", "callback_data": f"hpct|{kid}|10"}]]
     rows.append([{"text": "✍️ Elle yazacağım", "callback_data": f"helle|{kid}"},
                  {"text": "🚨 Acil hedef", "callback_data": f"hacil|{kid}"}])
-    rows.append([{"text": "⬅️ Kart", "callback_data": f"kart|{kid}"}])
+    rows.append(_nav(f"kart|{kid}"))
     return metin, rows
 
 
@@ -366,8 +409,8 @@ def setler_gorunumu(state: State) -> tuple[str, list]:
     if not rows:
         return ("Henüz set yok. Ürün kartındaki 📦 Sete ekle butonuyla kur "
                 "(örn. 'PC Toplama').",
-                [[{"text": "⬅️ Liste", "callback_data": "d|0"}]])
-    rows.append([{"text": "⬅️ Liste", "callback_data": "d|0"}])
+                [_nav("d|0")])
+    rows.append(_nav("d|0"))
     return "📦 Setlerin: (* = fiyatı okunamayan üye var)", rows
 
 
@@ -376,7 +419,7 @@ def set_gorunumu(ad: str, products: list[dict], state: State) -> tuple[str, list
     from datetime import date, timedelta
     bilgi = next((s for s in set_toplamlari(state) if s["ad"] == ad), None)
     if bilgi is None:
-        return "Bu set artık yok.", [[{"text": "⬅️ Setler", "callback_data": "setler"}]]
+        return "Bu set artık yok.", [_nav("setler")]
     sid = kisa_id(ad)
     satirlar = [f"📦 {ad} ({len(bilgi['uyeler'])} parça)"]
     toplam_s = f"💰 TOPLAM: {tl(bilgi['toplam'])}"
@@ -407,7 +450,7 @@ def set_gorunumu(ad: str, products: list[dict], state: State) -> tuple[str, list
     for key in uyeler:
         p = next((q for q in products if konfig.product_key(q) == key), None)
         if p is not None:
-            rows.append(urun_satiri(p, state.get(key)))
+            rows.append(urun_satiri(p, state.get(key), f"s{sid}"))
 
     # Alt bar: toplam + hedefe ilerleme çubuğu (toplam hedefe indikçe dolar)
     if bilgi["hedef"] and not bilgi["eksik"] and bilgi["toplam"] > 0:
@@ -423,8 +466,8 @@ def set_gorunumu(ad: str, products: list[dict], state: State) -> tuple[str, list
 
     rows.append([{"text": "🎯 Set hedefi", "callback_data": f"sethedef|{sid}"},
                  {"text": "📈 Toplam grafiği", "callback_data": f"setgrf|{sid}"}])
-    rows.append([{"text": "🗑 Seti sil", "callback_data": f"setsil|{sid}"},
-                 {"text": "⬅️ Setler", "callback_data": "setler"}])
+    rows.append([{"text": "🗑 Seti sil", "callback_data": f"setsil|{sid}"}])
+    rows.append(_nav("setler"))
     return "\n".join(satirlar), rows
 
 
@@ -441,8 +484,8 @@ def set_secim_gorunumu(p: dict) -> tuple[str, list]:
         else:
             rows.append([{"text": f"📦 {ad} — ekle",
                           "callback_data": f"sete|{kid}|{sid}"}])
-    rows.append([{"text": "➕ Yeni set kur", "callback_data": f"setyeni|{kid}"},
-                 {"text": "⬅️ Kart", "callback_data": f"kart|{kid}"}])
+    rows.append([{"text": "➕ Yeni set kur", "callback_data": f"setyeni|{kid}"}])
+    rows.append(_nav(f"kart|{kid}"))
     return f"📦 {p.get('label', '?')} hangi sete?", rows
 
 
@@ -723,8 +766,12 @@ async def _komut_isle(text: str, notifier: Notifier, shared: dict, state: State,
     parca = text.split()
     cmd = parca[0].lower().split("@")[0]
 
-    if cmd in ("/start", "/yardim", "/help"):
-        await notifier.send(YARDIM)
+    if cmd in ("/start", "/menu", "/basla"):
+        metin, rows = ana_menu_gorunumu(products, state)
+        await notifier.send_buttons(metin, rows)
+
+    elif cmd in ("/yardim", "/help"):
+        await notifier.send_buttons(YARDIM, [_nav(None)])
 
     elif cmd in ("/durum", "/liste"):
         metin, rows = durum_gorunumu(products, state)
@@ -826,7 +873,8 @@ async def _callback_isle(cb: dict, notifier: Notifier, shared: dict, state: Stat
     products = shared["products"]
 
     async def _kart_guncelle(p):
-        metin, rows = kart_gorunumu(p, state.get(konfig.product_key(p)))
+        k = konfig.product_key(p)
+        metin, rows = kart_gorunumu(p, state.get(k), _kart_geri(shared, kisa_id(k)))
         await notifier.edit_buttons(mid, metin, rows)
 
     # --- ekleme akışının eski callback'leri ---
@@ -844,6 +892,15 @@ async def _callback_isle(cb: dict, notifier: Notifier, shared: dict, state: Stat
         yuzde = float(parca[1])
         await urun_ekle_bitir(manager, notifier, shared,
                               round(bekleyen["fiyat"] * (1 - yuzde / 100)))
+        return
+
+    # --- ana menü + yardım ---
+    if islem == "menu":
+        metin, rows = ana_menu_gorunumu(products, state)
+        await notifier.edit_buttons(mid, metin, rows)
+        return
+    if islem == "yardim":
+        await notifier.edit_buttons(mid, YARDIM, [_nav(None)])
         return
 
     # --- liste görünümleri ---
@@ -870,7 +927,7 @@ async def _callback_isle(cb: dict, notifier: Notifier, shared: dict, state: Stat
         ad = set_bul(parca[1]) if len(parca) > 1 else None
         if ad is None:
             await notifier.edit_buttons(mid, "Bu set artık yok.",
-                                        [[{"text": "⬅️ Liste", "callback_data": "d|0"}]])
+                                        [_nav("d|0")])
             return
         sid = kisa_id(ad)
         if islem == "set":
@@ -927,11 +984,13 @@ async def _callback_isle(cb: dict, notifier: Notifier, shared: dict, state: Stat
     p = urun_bul(products, kid)
     if p is None:
         await notifier.edit_buttons(mid, "Bu ürün artık listede yok.",
-                                    [[{"text": "⬅️ Liste", "callback_data": "d|0"}]])
+                                    [_nav("d|0")])
         return
     key = konfig.product_key(p)
 
     if islem == "kart":
+        if len(parca) >= 3:      # nereden gelindi → bağlamsal geri için sakla
+            shared.setdefault("kart_ori", {})[kid] = parca[2]
         await _kart_guncelle(p)
 
     elif islem == "hedefsec":
@@ -1035,8 +1094,7 @@ async def _callback_isle(cb: dict, notifier: Notifier, shared: dict, state: Stat
             if islem == "aldim" else "🗑 İzlemeden çıkarıldı"
         await notifier.edit_buttons(
             mid, f"{on_ek}: {p.get('label', '?')}",
-            [[{"text": "↩️ Geri al", "callback_data": f"geria|{kid}"},
-              {"text": "⬅️ Liste", "callback_data": "d|0"}]])
+            [[{"text": "↩️ Geri al", "callback_data": f"geria|{kid}"}], _nav("d|0")])
 
     elif islem == "sustur":
         st = state.get(key)
