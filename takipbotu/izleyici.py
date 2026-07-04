@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Ürün izleyicileri: kontrol döngüsü, canlı görev yöneticisi, heartbeat."""
+"""Ürün izleyicileri: kontrol döngüsü, canlı görev yöneticisi, heartbeat,
+yedekleme ve sağlık özeti."""
 import asyncio
 import logging
+import os
 import random
+import subprocess
 import time
+import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
@@ -432,6 +436,105 @@ def degisim_raporu(products: list, state: State) -> str:
                      else f" · hedefe {kisa_tl(fark)}")
         satirlar.append(f"\n📦 {s['ad']}: {kisa_tl(s['toplam'])}{eksik}{hedef}")
     return "\n".join(satirlar)
+
+
+# ===================== YEDEKLEME + SAĞLIK =====================
+
+def _git_commit() -> str:
+    try:
+        r = subprocess.run(["git", "-C", str(konfig.BASE_DIR),
+                            "rev-parse", "--short", "HEAD"],
+                           capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() if r.returncode == 0 else ""
+    except Exception:
+        return ""
+
+
+def _sure(sn: float) -> str:
+    if sn < 3600:
+        return f"{sn/60:.0f} dk"
+    if sn < 86400:
+        return f"{sn/3600:.0f} sa {(sn % 3600)/60:.0f} dk"
+    return f"{sn/86400:.0f} gün"
+
+
+def _profil_mb() -> float:
+    toplam = 0
+    for kok, _, dosyalar in os.walk(konfig.USER_DATA_DIR):
+        for d in dosyalar:
+            try:
+                toplam += os.path.getsize(os.path.join(kok, d))
+            except OSError:
+                pass
+    return toplam / 1e6
+
+
+async def yedek_al(notifier: Notifier, state: State) -> bool:
+    """veri.db + state.json + telegram_urunler.yaml'ı zip'leyip Telegram'a
+    gönderir — yedek senin sohbetinde, yani MAKİNE DIŞINDA durur (disk ölse de
+    kurtarılır). products.yaml git'te, token BotFather'da olduğu için onlar
+    yedeğe girmez. Son yedek zamanı state'e işlenir."""
+    dosyalar = [d for d in (konfig.VERI_DB, konfig.STATE_FILE,
+                            konfig.TELEGRAM_URUNLER) if d.exists()]
+    if not dosyalar:
+        return False
+    zip_yol = konfig.BASE_DIR / "yedek.zip"
+    try:
+        with zipfile.ZipFile(zip_yol, "w", zipfile.ZIP_DEFLATED) as z:
+            for d in dosyalar:
+                z.write(d, d.name)
+    except OSError as e:
+        logging.warning(f"Yedek zip'lenemedi: {e}")
+        return False
+    tarih = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ok = await notifier.send_document(
+        zip_yol, f"🗄 Yedek {tarih} — veri.db + state + ürün listesi.\n"
+                 "Geri yükleme: bu dosyayı ~/tracker içine açman yeterli.")
+    if ok:
+        state.get("_meta")["last_backup_ts"] = time.time()
+        await state.save()
+        logging.info("Yedek Telegram'a gönderildi.")
+    return ok
+
+
+async def yedek_dongusu(notifier: Notifier, state: State, settings: dict) -> None:
+    """Periyodik yedek (varsayılan 7 günde bir). 6 saatte bir kontrol eder;
+    böylece makine kapalıyken kaçan yedek, açılınca kısa sürede tamamlanır."""
+    gun = int(settings.get("backup_days", 7))
+    if gun <= 0:
+        return
+    while True:
+        son = state.get("_meta").get("last_backup_ts", 0)
+        if time.time() - son > gun * 86400:
+            try:
+                await yedek_al(notifier, state)
+            except Exception as e:
+                logging.warning(f"Otomatik yedek alınamadı: {e}")
+        await asyncio.sleep(6 * 3600)
+
+
+def saglik_ozeti(products: list, state: State) -> str:
+    """Telefondan öz-teşhis: ayakta süresi, okunamayanlar, disk, son yedek, sürüm."""
+    meta = state.get("_meta")
+    up = time.time() - meta.get("last_start_ts", time.time())
+    sorunlu = [p for p in products if not p.get("paused")
+               and (lambda st: not st.get("last_good_ts")
+                    or time.time() - st.get("last_good_ts", 0) > 12 * 3600)
+               (state.get(konfig.product_key(p)))]
+    db = konfig.VERI_DB.stat().st_size / 1e6 if konfig.VERI_DB.exists() else 0
+    son_yedek = meta.get("last_backup_ts")
+    yedek_s = (_sure(time.time() - son_yedek) + " önce") if son_yedek else "henüz yok"
+    satir = ["🩺 Sağlık",
+             f"⏱ Ayakta: {_sure(up)}",
+             f"📦 {len(products)} ürün"
+             + (f" · ⚠️ {len(sorunlu)} okunamıyor (12s+)" if sorunlu
+                else " · hepsi okunuyor ✅"),
+             f"💾 veri.db {db:.1f} MB · profil {_profil_mb():.0f} MB",
+             f"🗄 Son yedek: {yedek_s}"]
+    commit = _git_commit()
+    if commit:
+        satir.append(f"🔖 Sürüm: {commit}")
+    return "\n".join(satir)
 
 
 async def heartbeat(notifier: Notifier, settings: dict, shared: dict,

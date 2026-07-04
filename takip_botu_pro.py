@@ -100,19 +100,21 @@ async def main() -> None:
         manager.sync(products)
         hb = asyncio.create_task(izleyici.heartbeat(notifier, settings, shared,
                                                     state, context))
+        yd = asyncio.create_task(izleyici.yedek_dongusu(notifier, state, settings))
         lst = asyncio.create_task(arayuz.telegram_listener(notifier, shared, state,
                                                            manager, context))
         logging.info(f"{len(products)} ürün izleniyor. Durdurmak için Ctrl+C. "
                      "Telegram'dan /durum yazabilirsin.")
         try:
-            await asyncio.gather(hb, lst)
+            await asyncio.gather(hb, yd, lst)
         except (KeyboardInterrupt, asyncio.CancelledError):
             logging.info("Durduruluyor...")
         finally:
             izleyiciler = manager.cancel_all()
+            yd.cancel()
             hb.cancel()
             lst.cancel()
-            await asyncio.gather(*izleyiciler, hb, lst, return_exceptions=True)
+            await asyncio.gather(*izleyiciler, hb, yd, lst, return_exceptions=True)
             await context.close()
             await rq.dispose()
 

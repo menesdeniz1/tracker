@@ -21,7 +21,14 @@ from playwright.async_api import BrowserContext
 from . import konfig, veri
 from .bildirim import Notifier
 from .fiyat import kisa_tl, parse_try_amount, pct, tl
-from .izleyici import WatcherManager, grafik_png, png_cek, set_toplamlari
+from .izleyici import (
+    WatcherManager,
+    grafik_png,
+    png_cek,
+    saglik_ozeti,
+    set_toplamlari,
+    yedek_al,
+)
 from .tarayici import akakce_ara, check_once
 from .veri import State
 
@@ -43,6 +50,7 @@ KOMUTLAR = [
     {"command": "setler", "description": "Ürün grupları: canlı toplam + set hedefi"},
     {"command": "sorunlu", "description": "Sadece okunamayan/engelli ürünler"},
     {"command": "grafik", "description": "Fiyat grafiği (PNG + HTML)"},
+    {"command": "saglik", "description": "Bot sağlığı + yedek durumu"},
     {"command": "csv", "description": "Ham fiyat geçmişi dosyası"},
     {"command": "yardim", "description": "Komutlar ve ipuçları"},
 ]
@@ -112,7 +120,8 @@ def ana_menu_gorunumu(products: list[dict], state: State) -> tuple[str, list]:
         rows.append([{"text": f"⚠️ Sorunlular ({sorunlu})", "callback_data": "sor|0"}])
     rows.append([{"text": f"📦 Setler ({len(setler)})", "callback_data": "setler"},
                  {"text": "📈 Grafik", "callback_data": "grftum"}])
-    rows.append([{"text": "❓ Yardım", "callback_data": "yardim"}])
+    rows.append([{"text": "🩺 Sağlık", "callback_data": "saglik"},
+                 {"text": "❓ Yardım", "callback_data": "yardim"}])
     metin = ("🏠 Ana Menü — ne yapmak istersin?\n"
              "İpucu: ürün linki gönder → eklerim · ürün adı yaz → kartı açılır")
     return metin, rows
@@ -785,6 +794,16 @@ async def _komut_isle(text: str, notifier: Notifier, shared: dict, state: State,
         metin, rows = setler_gorunumu(state)
         await notifier.send_buttons(metin, rows)
 
+    elif cmd in ("/saglik", "/sağlık"):
+        await notifier.send_buttons(saglik_ozeti(products, state),
+                                    [[{"text": "🗄 Şimdi yedekle",
+                                       "callback_data": "yedekle"}], _nav(None)])
+
+    elif cmd == "/yedek":
+        ok = await yedek_al(notifier, state)
+        if not ok:
+            await notifier.send("⚠️ Yedeklenecek veri yok.")
+
     elif cmd == "/ekle":
         url = parca[1] if len(parca) > 1 else ""
         if not url.startswith("http"):
@@ -901,6 +920,17 @@ async def _callback_isle(cb: dict, notifier: Notifier, shared: dict, state: Stat
         return
     if islem == "yardim":
         await notifier.edit_buttons(mid, YARDIM, [_nav(None)])
+        return
+    if islem == "saglik":
+        await notifier.edit_buttons(mid, saglik_ozeti(products, state),
+                                    [[{"text": "🗄 Şimdi yedekle",
+                                       "callback_data": "yedekle"}], _nav(None)])
+        return
+    if islem == "yedekle":
+        await notifier.edit_buttons(mid, "🗄 Yedek alınıyor...", [_nav(None)])
+        ok = await yedek_al(notifier, state)
+        await notifier.send("✅ Yedek gönderildi." if ok
+                            else "⚠️ Yedeklenecek veri yok.")
         return
 
     # --- liste görünümleri ---

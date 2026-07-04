@@ -230,6 +230,41 @@ def test_kart_set_uyeligi_gosterir(tmp_path, monkeypatch):
     assert "📦 Set: PC" in metin
 
 
+def test_yedek_al_ve_saglik(tmp_path, monkeypatch):
+    """Yedek zip'i üç veri dosyasını içerir + son yedek zamanı işlenir;
+    sağlık özeti temel bilgileri döker."""
+    import zipfile
+
+    state = _ortam(tmp_path, monkeypatch)
+    # yedek_al konfig yollarını okur → hepsini tmp_path'e hizala
+    monkeypatch.setattr(konfig, "BASE_DIR", tmp_path)
+    monkeypatch.setattr(konfig, "VERI_DB", tmp_path / "veri.db")
+    monkeypatch.setattr(konfig, "STATE_FILE", tmp_path / "state.json")
+    monkeypatch.setattr(konfig, "USER_DATA_DIR", str(tmp_path / "profil"))
+    state.path = tmp_path / "state.json"
+
+    asyncio.run(veri.append_history("CPU", "s", 100.0, None, "seçici"))  # veri.db
+    asyncio.run(state.save())                                            # state.json
+    konfig.set_urun("PC", "CPU")                                         # tg.yaml
+
+    n = _Notifier()
+    gonderilen = {}
+
+    async def sahte_belge(path, caption=""):
+        gonderilen["path"] = path
+        return True
+    n.send_document = sahte_belge
+
+    assert asyncio.run(izleyici.yedek_al(n, state)) is True
+    with zipfile.ZipFile(gonderilen["path"]) as z:
+        adlar = z.namelist()
+    assert {"veri.db", "state.json", "tg.yaml"} <= set(adlar)
+    assert state.get("_meta")["last_backup_ts"] > 0
+
+    ozet = izleyici.saglik_ozeti(konfig.load_products(), state)
+    assert "Sağlık" in ozet and "Ayakta" in ozet and "Son yedek" in ozet
+
+
 def test_kart_pazar_bilgisi(tmp_path, monkeypatch):
     _ortam(tmp_path, monkeypatch)
     st = {"last_good_price": 100.0,
