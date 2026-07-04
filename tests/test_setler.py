@@ -176,6 +176,45 @@ def test_set_toplam_bildirimi(tmp_path, monkeypatch):
     assert len(n.mesajlar) == 1
 
 
+def test_edit_not_modified_yeni_mesaj_atmaz():
+    """'message is not modified' → başarı say, YENİ MESAJ ATMA (geri basınca
+    aynı ekran sohbetin altına kopuk mesaj düşmesin)."""
+    from takipbotu.bildirim import Notifier
+
+    class Ctx:
+        def __init__(self, desc):
+            self.desc = desc
+
+        async def post(self, url, data=None, timeout=None):
+            desc = self.desc
+
+            class R:
+                async def json(self_inner):
+                    return ({"ok": True, "result": {}} if desc is None
+                            else {"ok": False, "description": desc})
+            return R()
+
+    # not modified → True döner, send_buttons ÇAĞRILMAZ
+    n = Notifier(Ctx("Bad Request: message is not modified"),
+                 {"telegram_bot_token": "t", "telegram_chat_id": "1"})
+    cagrildi = []
+    n.send_buttons = lambda *a, **k: cagrildi.append(1)  # type: ignore
+    ok = asyncio.run(n.edit_buttons(7, "metin", [[{"text": "x", "callback_data": "y"}]]))
+    assert ok is True and not cagrildi
+
+    # gerçek hata (mesaj eski) → yeni mesaj atılır
+    n2 = Notifier(Ctx("Bad Request: message to edit not found"),
+                  {"telegram_bot_token": "t", "telegram_chat_id": "1"})
+    atilan = []
+
+    async def sahte_send(text, rows):
+        atilan.append(text)
+        return True
+    n2.send_buttons = sahte_send  # type: ignore
+    asyncio.run(n2.edit_buttons(7, "metin", [[{"text": "x", "callback_data": "y"}]]))
+    assert atilan == ["metin"]
+
+
 def test_tg_ayri_yoklama_baglantisi():
     """getUpdates verilen ayrı bağlantıyı kullanmalı; diğer çağrılar ana
     bağlantıyı. (Yoklamanın buton/edit istekleriyle çakışmasını önler.)"""

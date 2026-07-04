@@ -23,8 +23,11 @@ class Notifier:
     def api(self) -> str:
         return f"https://api.telegram.org/bot{self.token}"
 
-    async def tg(self, method: str, timeout_ms: int = 30000, rq=None, **params):
+    async def tg(self, method: str, timeout_ms: int = 30000, rq=None,
+                 raw: bool = False, **params):
         """Telegram API çağrısı. Başarıda 'result' döner, hatada None.
+        raw=True → ham cevap sözlüğü döner (hata sebebini görmek için; edit
+        'not modified' ayrımı buna dayanır).
         rq verilirse o ayrı bağlantı bağlamı kullanılır — uzun süren getUpdates
         yoklaması, hızlı buton/edit istekleriyle aynı havuzu paylaşıp birbirini
         aç bırakmasın diye (aksi halde yoklama takılınca butonlar cevapsız kalır)."""
@@ -34,12 +37,16 @@ class Notifier:
             resp = await (rq or self.rq).post(f"{self.api}/{method}", data=params,
                                               timeout=timeout_ms)
             js = await resp.json()
+            if raw:
+                return js
             if not js.get("ok"):
                 logging.warning(f"Telegram {method} hatası: {js.get('description')}")
                 return None
             return js.get("result")
         except Exception as e:
             logging.warning(f"Telegram {method} isteği başarısız: {e}")
+            if raw:
+                return {"ok": False, "description": str(e)}
             return None
 
     async def check_bot(self) -> bool:
@@ -130,11 +137,17 @@ class Notifier:
     async def edit_buttons(self, message_id, text: str,
                            buttons: list[list[dict]]) -> bool:
         """Mevcut mesajı yerinde günceller (kart gezinmesi sohbeti kirletmesin).
-        Düzenleme başarısız olursa (mesaj eski vb.) yeni mesaj gönderilir."""
-        r = await self.tg("editMessageText", chat_id=self.chat_id,
-                          message_id=message_id, text=text,
-                          disable_web_page_preview=True,
-                          reply_markup={"inline_keyboard": buttons})
-        if r:
+        'message is not modified' → ekranda zaten doğru içerik var, BAŞARI say
+        ve yeni mesaj ATMA (yoksa 'geri' bastığında aynı ekran sohbetin altına
+        kopuk mesaj olarak düşüyordu). Sadece gerçek hatada (mesaj çok eski,
+        silinmiş vb.) yeni mesaj gönderilir."""
+        js = await self.tg("editMessageText", raw=True, chat_id=self.chat_id,
+                           message_id=message_id, text=text,
+                           disable_web_page_preview=True,
+                           reply_markup={"inline_keyboard": buttons})
+        if js and js.get("ok"):
             return True
+        desc = ((js or {}).get("description") or "").lower()
+        if "not modified" in desc:
+            return True     # içerik zaten güncel — sessiz geç
         return await self.send_buttons(text, buttons)
