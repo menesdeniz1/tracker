@@ -7,10 +7,17 @@ Kaynak gerçeği git'teki products.yaml'dır; Telegram'dan yapılan her değişi
 elle düzenlediği dosya (yorumlarıyla birlikte) hiç bozulmasın."""
 import os
 import re
+import time
 from pathlib import Path
 from urllib.parse import urlparse
 
 import yaml
+
+try:
+    import fcntl
+    _FLOCK = True
+except ImportError:              # Windows — fcntl yok, kilit no-op olur
+    _FLOCK = False
 
 # ===================== YOLLAR =====================
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -25,7 +32,33 @@ GRAFIK_HTML = BASE_DIR / "fiyat_grafigi.html"
 GRAFIK_PNG = BASE_DIR / "fiyat_grafigi.png"
 USER_DATA_DIR = str(BASE_DIR / ".chrome-profile-bot")
 LOG_FILE = BASE_DIR / "takip.log"
+BOT_LOCK = BASE_DIR / "bot.lock"
 # ==================================================
+
+
+def tek_kopya_kilidi(timeout: float = 50, lock_path: Path = BOT_LOCK):
+    """Aynı anda TEK bot çalışsın diye exclusive dosya kilidi (flock).
+    Eski instance hâlâ kapanıyorsa (tarayıcı kapatma ~45sn) kilit boşalana kadar
+    bekler; timeout dolarsa None döner → çağıran çıkar, gözetmen tekrar dener.
+    Kilit process ölünce (çökme dahil) OS tarafından otomatik bırakılır —
+    bayat-kilit sorunu yok. Handle DÖNER; çağıran onu process boyunca açık
+    tutmalı (kapanınca kilit bırakılır). Windows'ta fcntl yoksa no-op (handle
+    döner ama kilitlemez)."""
+    f = open(lock_path, "w")
+    if not _FLOCK:
+        return f
+    son = time.time() + timeout
+    while True:
+        try:
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            f.write(str(os.getpid()))
+            f.flush()
+            return f
+        except OSError:
+            if time.time() >= son:
+                f.close()
+                return None
+            time.sleep(2)
 
 
 def load_yaml(path: Path) -> dict:

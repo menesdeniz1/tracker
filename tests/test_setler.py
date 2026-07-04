@@ -215,6 +215,22 @@ def test_edit_not_modified_yeni_mesaj_atmaz():
     assert atilan == ["metin"]
 
 
+def test_tek_kopya_kilidi(tmp_path):
+    """İlk kilit tutulurken ikinci çağrı None döner (çift bot engellenir);
+    ilki bırakılınca yeniden alınabilir."""
+    from takipbotu import konfig
+    if not konfig._FLOCK:
+        return                                  # Windows — kilit no-op, atla
+    lp = tmp_path / "bot.lock"
+    h1 = konfig.tek_kopya_kilidi(timeout=0, lock_path=lp)
+    assert h1 is not None                        # ilk kopya kilidi aldı
+    assert konfig.tek_kopya_kilidi(timeout=0, lock_path=lp) is None  # ikinci bloke
+    h1.close()                                   # ilk kopya kapandı → kilit serbest
+    h2 = konfig.tek_kopya_kilidi(timeout=0, lock_path=lp)
+    assert h2 is not None
+    h2.close()
+
+
 def test_tg_ayri_yoklama_baglantisi():
     """getUpdates verilen ayrı bağlantıyı kullanmalı; diğer çağrılar ana
     bağlantıyı. (Yoklamanın buton/edit istekleriyle çakışmasını önler.)"""

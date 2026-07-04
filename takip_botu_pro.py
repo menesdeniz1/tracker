@@ -65,6 +65,15 @@ async def main() -> None:
     if not products:
         logging.error("products.yaml içinde aktif ürün yok.")
         return
+    # Tek-kopya kilidi: aynı anda ikinci bot getUpdates çekip çakışmasın.
+    # (Restart sırasında eski instance kapanana kadar bu kopya bekler; kilit
+    # alınamazsa temiz çıkar, gözetmen tekrar dener.) Handle process boyunca
+    # açık kalmalı → 'kilit' değişkeni main() kapsamında tutulur.
+    kilit = konfig.tek_kopya_kilidi()
+    if kilit is None:
+        logging.error("Başka bir bot instance'ı çalışıyor (kilit alınamadı) — "
+                      "bu kopya çıkıyor. Gözetmen birazdan tekrar dener.")
+        return
     sites = _sites()
     veri.baslat()   # veri.db şeması + gerekiyorsa eski CSV'nin tek seferlik göçü
     state = veri.State(konfig.STATE_FILE)
