@@ -241,6 +241,28 @@ def test_kart_baglamsal_geri():
     assert nav[-1]["callback_data"] == "menu"
 
 
+def test_kart_geri_sayfayi_korur():
+    """3. sayfadan girip geri basınca yine 3. sayfaya dönmeli (hep 1'e değil)."""
+    from takipbotu.arayuz import _kart_geri
+    kid = "abc"
+    assert _kart_geri({"kart_ori": {kid: "d3"}}, kid) == "d|3"
+    assert _kart_geri({"kart_ori": {kid: "sor2"}}, kid) == "sor|2"
+    assert _kart_geri({"kart_ori": {kid: "d"}}, kid) == "d|0"      # eski/varsayılan
+    assert _kart_geri({"kart_ori": {kid: "sor"}}, kid) == "sor|0"
+    assert _kart_geri({"kart_ori": {kid: "s1a2b3c4d5"}}, kid) == "set|1a2b3c4d5"
+    assert _kart_geri({}, kid) == "d|0"                            # kayıt yoksa
+
+
+def test_durum_urun_satiri_sayfa_origini_tasir(tmp_path):
+    """3. sayfadaki ürün satırı callback'i 'd3' origin'i taşımalı."""
+    products = [{"label": f"U{i}"} for i in range(20)]  # 3 sayfa
+    state = veri.State(tmp_path / "s.json")
+    _, rows = durum_gorunumu(products, state, sayfa=2)
+    kart_cb = next(r[0]["callback_data"] for r in rows
+                   if r[0].get("callback_data", "").startswith("kart|"))
+    assert kart_cb.endswith("|d2")             # 3. sayfa (0-index 2) origin'i
+
+
 def test_cb_menu_ve_yardim(ortam):
     n, m, state, shared = ortam
     _isle(_cb("menu"), n, shared, state, m)

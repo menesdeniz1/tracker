@@ -101,12 +101,18 @@ def _nav(geri_cb: str | None) -> list[dict]:
 
 
 def _kart_geri(shared: dict, kid: str) -> str:
-    """Kartın 'geri' hedefi: karta nereden gelindiyse oraya döner."""
+    """Kartın 'geri' hedefi: karta nereden ve HANGİ SAYFADAN gelindiyse oraya
+    döner. ori biçimleri: 'd<sayfa>' (liste), 'sor<sayfa>' (sorunlu),
+    's<sid>' (set). sid sha1-hex olduğu için 'o'/'r' içermez → 'sor' ile
+    çakışmaz. Sayfa numarası, 3. sayfadan girip geri basınca yine 3. sayfaya
+    dönmeyi sağlar (eskiden hep 1. sayfaya atıyordu)."""
     ori = (shared.get("kart_ori") or {}).get(kid, "d")
-    if ori == "sor":
-        return "sor|0"
-    if ori.startswith("s") and len(ori) > 1:
+    if ori.startswith("sor"):
+        return f"sor|{ori[3:] or 0}"
+    if ori.startswith("s") and len(ori) > 1:      # set (s + 10 haneli sid)
         return f"set|{ori[1:]}"
+    if ori.startswith("d"):
+        return f"d|{ori[1:] or 0}"
     return "d|0"
 
 
@@ -225,7 +231,9 @@ def durum_gorunumu(products: list[dict], state: State, sayfa: int = 0,
 
     rows = []
     for p in dilim:
-        rows.append(urun_satiri(p, state.get(konfig.product_key(p)), on_ek))
+        # kart origin'ine sayfa numarasını da göm → geri basınca aynı sayfaya dön
+        rows.append(urun_satiri(p, state.get(konfig.product_key(p)),
+                                f"{on_ek}{sayfa}"))
     if toplam_sayfa > 1:
         rows.append([{"text": "◀️", "callback_data": f"{on_ek}|{sayfa-1}"},
                      {"text": f"{sayfa+1}/{toplam_sayfa}", "callback_data": f"{on_ek}|{sayfa}"},
