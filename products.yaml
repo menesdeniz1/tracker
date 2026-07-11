@@ -18,6 +18,9 @@ settings:
   min_gap_per_host_seconds: 25   # Aynı siteye iki istek arasındaki minimum saniye
   sanity_guard: true             # Şüpheli (anormal düşük) fiyatı ikinci okumayla doğrula
   renotify_drop_pct: 3           # Cooldown içinde fiyat bu % kadar daha düşerse yine bildir
+  renotify_minutes: 240          # Hedef ALTINDA kaldıkça bu aralıkla hatırlat (240=4 saat;
+                                 # ürün silinene/susturulana kadar sürer; 0 = ürünün kendi
+                                 # cooldown_minutes'i geçerli olsun)
   error_alert_streak: 5          # Ürün üst üste bu kadar okunamazsa uyarı mesajı at
   low30_alert: true              # Hedefe inmese bile "son 30 günün en düşüğü" bilgisi gönder
   low30_min_days: 7              # Bu sinyal için en az kaç günlük veri birikmiş olmalı

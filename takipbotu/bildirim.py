@@ -18,6 +18,7 @@ class Notifier:
         self.phone = str(settings.get("phone", "")).lstrip("+")
         self.callmebot_key = str(settings.get("callmebot_apikey", "") or "")
         self.lock = asyncio.Lock()
+        self.son_hata = ""      # son istek hatası (zombi/motor-ölü teşhisi için)
 
     @property
     def api(self) -> str:
@@ -37,6 +38,7 @@ class Notifier:
             resp = await (rq or self.rq).post(f"{self.api}/{method}", data=params,
                                               timeout=timeout_ms)
             js = await resp.json()
+            self.son_hata = ""   # istek yerine ulaştı → motor + ağ canlı
             if raw:
                 return js
             if not js.get("ok"):
@@ -44,6 +46,7 @@ class Notifier:
                 return None
             return js.get("result")
         except Exception as e:
+            self.son_hata = str(e)
             logging.warning(f"Telegram {method} isteği başarısız: {e}")
             if raw:
                 return {"ok": False, "description": str(e)}

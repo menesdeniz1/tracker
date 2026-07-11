@@ -15,6 +15,7 @@ kurulum.yaml
 guncelleyici_state.json
 guncelleyici_state.json.tmp
 *.log
+*.log.*
 __pycache__/
 venv/
 .DS_Store

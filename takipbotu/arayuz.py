@@ -13,6 +13,7 @@ Eski numaralı komutlar (/sil 3 gibi) geriye uyum için çalışmaya devam eder.
 import asyncio
 import hashlib
 import logging
+import os
 import re
 import time
 
@@ -613,6 +614,19 @@ async def _akakce_akisi(manager: WatcherManager, notifier: Notifier, shared: dic
 
 # ===================== ANA DİNLEYİCİ =====================
 
+# Playwright motorunun (driver süreci) ÖLDÜĞÜNÜ gösteren hata izleri.
+# Motor ölünce süreç yaşar ama hiçbir şey çalışmaz (ne fiyat okuma ne
+# Telegram) — 8-11 Temmuz'da yaşanan 3 günlük zombi durumu buydu. Bu izler
+# ağ kesintisinden FARKLIDIR (timeout/DNS hatası motoru öldürmez).
+MOTOR_OLU_IZLERI = ("reading from the driver", "pipe closed",
+                    "has been closed", "Connection closed")
+
+
+def motor_olu_mu(hata: str) -> bool:
+    """Hata mesajı Playwright motorunun öldüğünü mü gösteriyor?"""
+    return any(iz in hata for iz in MOTOR_OLU_IZLERI)
+
+
 def _gorev_sonucu_logla(gorev: asyncio.Task) -> None:
     if gorev.cancelled():
         return
@@ -635,13 +649,29 @@ async def telegram_listener(notifier: Notifier, shared: dict, state: State,
         return
     await notifier.tg("setMyCommands", commands=KOMUTLAR)   # "/" menüsü
     offset = 0
+    olu_sayac = 0
     while True:
         try:
             updates = await notifier.tg("getUpdates", timeout_ms=30000,
                                         rq=poll_rq, offset=offset, timeout=25)
             if updates is None:
+                # Zombi dedektörü: motor-ölü izli hata art arda sürüyorsa
+                # süreç yaşasa da her şey ölüdür → kendimizi kapatıp gözetmenin
+                # TAZE motorla yeniden başlatmasını sağla. Ağ kesintisi bu
+                # izlere uymaz; onda sonsuza dek sabırla yeniden denenir.
+                if motor_olu_mu(getattr(notifier, "son_hata", "")):
+                    olu_sayac += 1
+                    if olu_sayac >= 10:      # ~20+ sn kesintisiz motor-ölü
+                        logging.critical(
+                            "Playwright motoru öldü (%s) — gözetmen taze "
+                            "başlatsın diye çıkılıyor.",
+                            notifier.son_hata[:100])
+                        os._exit(75)
+                else:
+                    olu_sayac = 0
                 await asyncio.sleep(2)
                 continue
+            olu_sayac = 0
             for u in updates:
                 offset = u["update_id"] + 1
                 # Her update KENDİ görevinde işlenir: uzun süren bir işlem

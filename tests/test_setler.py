@@ -215,6 +215,45 @@ def test_edit_not_modified_yeni_mesaj_atmaz():
     assert atilan == ["metin"]
 
 
+def test_etkin_cooldown_oncelik():
+    """renotify_minutes verilirse tum urunlerde o gecerli (4 saatte bir
+    hatirlatma); yoksa urunun kendi cooldown'u; o da yoksa 1440."""
+    assert izleyici.etkin_cooldown_dk({"cooldown_minutes": 1440},
+                                      {"renotify_minutes": 240}) == 240
+    assert izleyici.etkin_cooldown_dk({"cooldown_minutes": 720}, {}) == 720
+    assert izleyici.etkin_cooldown_dk({}, {}) == 1440
+    assert izleyici.etkin_cooldown_dk({"cooldown_minutes": 720},
+                                      {"renotify_minutes": 0}) == 720
+
+
+def test_motor_olu_mu():
+    """Playwright motor-olu izleri taninmali; ag hatalari motor-olu DEGILDIR
+    (ag kesintisinde cikmak yerine sabirla beklenir)."""
+    from takipbotu.arayuz import motor_olu_mu
+    assert motor_olu_mu("APIRequestContext.post: Connection closed while reading from the driver")
+    assert motor_olu_mu("Target page, context or browser has been closed")
+    assert not motor_olu_mu("APIRequestContext.post: Timeout 30000ms exceeded.")
+    assert not motor_olu_mu("Could not resolve host: api.telegram.org")
+    assert not motor_olu_mu("read ETIMEDOUT")
+    assert not motor_olu_mu("")
+
+
+def test_set_bildirimi_renotify_araligi(tmp_path, monkeypatch):
+    """Set bildirimi de renotify_minutes'a uyar: aralik gecince tekrar bildirir."""
+    state = _ortam(tmp_path, monkeypatch)
+    konfig.set_urun("PC", "CPU")
+    konfig.set_hedef("PC", 250.0)
+    state.get("CPU")["last_good_price"] = 100.0
+    n = _Notifier()
+    ayar = {"renotify_minutes": 240}
+    asyncio.run(izleyici.set_toplam_kontrol(n, state, "CPU", ayar))
+    assert len(n.mesajlar) == 1
+    # 4 saat gecmis gibi yap → tekrar bildirir (24 saat beklemez)
+    state.get("_set:PC")["last_notify_ts"] = time.time() - 5 * 3600
+    asyncio.run(izleyici.set_toplam_kontrol(n, state, "CPU", ayar))
+    assert len(n.mesajlar) == 2
+
+
 def test_tek_kopya_kilidi(tmp_path):
     """İlk kilit tutulurken ikinci çağrı None döner (çift bot engellenir);
     ilki bırakılınca yeniden alınabilir."""

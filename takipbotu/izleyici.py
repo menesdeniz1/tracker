@@ -50,12 +50,22 @@ async def check_product(context: BrowserContext, sites: Sites, throttle: HostThr
     return sonuclar
 
 
+def etkin_cooldown_dk(prod: dict, settings: dict) -> int:
+    """Alarm tekrar aralığı (dk). settings.renotify_minutes verilmişse TÜM
+    ürünlerde o geçerlidir: hedef altında kaldıkça, ürün silinene ya da
+    susturulana kadar bu aralıkla hatırlatılır (kullanıcı isteği — 'düştü,
+    4 saat sonra hâlâ düşükse yine haber ver'). Verilmemişse ürünün kendi
+    cooldown_minutes değeri (varsayılan 1440 = günde bir)."""
+    return int(settings.get("renotify_minutes", 0)
+               or prod.get("cooldown_minutes", 1440))
+
+
 async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostThrottle,
                           notifier: Notifier, prod: dict, state: State,
                           sem: asyncio.Semaphore, settings: dict) -> None:
     label = prod.get("label", "Ürün")
     key = konfig.product_key(prod)
-    cooldown = timedelta(minutes=int(prod.get("cooldown_minutes", 1440)))
+    cooldown = timedelta(minutes=etkin_cooldown_dk(prod, settings))
     renotify_drop = float(prod.get("renotify_drop_pct",
                                    settings.get("renotify_drop_pct", 3)))
     sanity_guard = bool(settings.get("sanity_guard", True))
@@ -156,7 +166,7 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                                 logging.info(f"[{label}] 30-gün dibi bildirildi: {tl(fp)}")
 
                         # üyesi olduğu setlerin TOPLAM hedefini kontrol et
-                        await set_toplam_kontrol(notifier, state, key)
+                        await set_toplam_kontrol(notifier, state, key, settings)
 
                     if gerekli and not supheli:
                         thr2 = prod.get("price_threshold2_tl")
@@ -200,6 +210,11 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                                         ek += " ⚠️ tek satıcı belirgin ucuz — dikkat"
                                 elif pazar["satici_sayisi"] == 1:
                                     ek += " ⚠️ (tek satıcı)"
+                            cd_dk = etkin_cooldown_dk(prod, settings)
+                            if cd_dk < 1440:
+                                ek += (f"\n⏰ Hedef altında kaldıkça "
+                                       f"{cd_dk/60:.0f} saatte bir hatırlatırım "
+                                       "(kapat: 🔕 sustur)")
                             onek = "🚨 ACİL — " if acil else "🔥 "
                             msg = f"{onek}{label}\n{detay}{ek}\n🌐 {kaynak}\n🔗 {best['url']}"
                             if await alarm_gonder(notifier, key, msg):
@@ -264,18 +279,20 @@ def set_toplamlari(state: State) -> list[dict]:
     return out
 
 
-async def set_toplam_kontrol(notifier: Notifier, state: State, key: str) -> None:
+async def set_toplam_kontrol(notifier: Notifier, state: State, key: str,
+                             settings: dict | None = None) -> None:
     """Ürün fiyatı güncellenince, üyesi olduğu setlerin TOPLAM hedefini kontrol
     eder. Tüm üyelerin fiyatı okunmuşsa ve toplam hedefin altındaysa bildirir
-    (set başına 24 saat cooldown). Parçalar tek tek hedefte olmasa bile toplam
-    fırsatını yakalar — PC toplama senaryosunun kalbi."""
+    (renotify_minutes aralığıyla — hedef altında kaldıkça hatırlatır).
+    Parçalar tek tek hedefte olmasa bile toplam fırsatını yakalar."""
+    bekleme_s = int((settings or {}).get("renotify_minutes", 0) or 1440) * 60
     for s in set_toplamlari(state):
         if key not in s["uyeler"] or s["eksik"] or not s["hedef"]:
             continue
         if s["toplam"] > float(s["hedef"]):
             continue
         st = state.get(f"_set:{s['ad']}")
-        if time.time() - st.get("last_notify_ts", 0) < 24 * 3600:
+        if time.time() - st.get("last_notify_ts", 0) < bekleme_s:
             continue
         parcalar = "\n".join(
             f"  • {k}: {tl(state.get(k).get('last_good_price'))}"
