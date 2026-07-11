@@ -330,6 +330,22 @@ products:
     sleep_min: 1800
     sleep_max: 3600
 
+  - label: "MSI MAG B850 Tomahawk Max Wi-Fi"
+    url: "https://www.akakce.com/anakart/en-ucuz-msi-mag-b850-tomahawk-max-wi-fi-amd-am5-ddr5-atx-fiyati,904067641.html"
+    mode: price
+    price_threshold_tl: 11800
+    cooldown_minutes: 1440
+    sleep_min: 1800
+    sleep_max: 3600
+
+  - label: "APC Back-UPS Pro Gaming BGM2200B-GR 2200VA"
+    url: "https://www.akakce.com/kesintisiz-guc-kaynagi/en-ucuz-apc-back-ups-pro-gaming-siyah-bgm2200b-gr-2200-va-line-interactive-fiyati,716591897.html"
+    mode: price
+    price_threshold_tl: 15500
+    cooldown_minutes: 1440
+    sleep_min: 1800
+    sleep_max: 3600
+
   # ---- ÖRNEK: eski stock-bot'taki gibi beden/stok takibi (kapalı) ----
   - label: "Örnek Ayakkabı 42 Numara"
     url: "https://ornek-site.com/urun/ayakkabi"
