@@ -45,25 +45,40 @@ doğru `price_selector` yaz (sayfada sağ tık → İncele → fiyat elementinin
 
 ## Telegram'dan yönetim — kartlar ve butonlar (numara ezberi yok)
 
-Üç giriş yolu var, hepsi butonlara çıkar:
+**`/menu` (veya `/start`) — 🏠 ana menü, her şeyin buton olduğu tek giriş
+ekranı.** Bir kez yaz, gerisini butonla yürüt. Her ekranın altında standart
+`[⬅️ Geri] [🏠 Menü]` satırı vardır; **geri bağlamsaldır** — bir sete girip
+içindeki ürüne dokunduysan geri o sete döner, sorunlu listesinden girdiysen
+oraya, 3. sayfadan girdiysen yine 3. sayfaya (hep 1. sayfaya atmaz).
+
+Üç giriş yolu var, hepsi kart/butonlara çıkar:
 
 - **ürün linki gönder** → fiyatı okur, hedefi butonla seçtirir, izleme başlar,
   ardından "Akakçe'ye de bağlayayım mı?" diye kendisi önerir.
 - **`/durum`** → özet başlık (`📊 30 ürün · ✅ 24 · ⚠️ 4 · ⏸ 2`) + ürün başına
-  tıklanabilir satır. **Sorunlular en üstte**, hedefe yakınlar hemen altında.
-  Satıra dokun → **ürün kartı** açılır: fiyat, hedef (+ hedefe % kalan),
-  7g trend, 30g dip, mini grafik (▁▂▄▆█) ve butonlar:
-  🎯 hedef değiştir (%3/%5/%10 altı ya da elle) · 🔍 Akakçe'ye bağla ·
-  ⏸ duraklat/devam · ➕ kaynak ekle · 📈 sadece bu ürünün grafiği ·
-  🗑 sil (onaylı + **geri al**'lı).
+  tıklanabilir satır (sol: ad, sağ: fiyat/durum — fiyat telefonda hep görünür).
+  **Sorunlular en üstte**, hedefe yakınlar hemen altında. Satıra dokun →
+  **ürün kartı** açılır: fiyat, hedef (+ hedefe kalan somut TL), 7g trend,
+  30g dip, "bu iyi fiyat mı" bağlamı (🟢/🟡/🔴 + 90g dip/medyan), Akakçe
+  satıcı sayısı, mini grafik (▁▂▄▆█) ve butonlar: 🎯 hedef değiştir
+  (%3/%5/%10 altı ya da elle) · 🚨 acil hedef · 🔍 Akakçe'ye bağla ·
+  ⏸ duraklat/devam · ➕ kaynak ekle · 📦 sete ekle · 📈 sadece bu ürünün
+  grafiği · 🗑 sil (onaylı + **geri al**'lı).
 - **ürün adı yaz** (örn. `kingston`) → kartı doğrudan açılır; birden çok
   eşleşme varsa kısa seçim listesi gelir.
 
 Diğer komutlar: `/sorunlu` (sadece okunamayan/engelliler — her birinde
-Akakçe'ye bağlama kısayolu), `/setler`, `/grafik`, `/csv`, `/yardim`.
-Alarm mesajlarının altında da hızlı aksiyonlar vardır: **✅ Aldım** (izlemeyi
-bırakır) · **🔕 1 hafta sustur** · **🎯 hedefi değiştir**. Eski numaralı
-komutlar (`/sil 3`, `/hedef 3 12750`, `/akakce 3`) geriye uyum için hâlâ çalışır.
+Akakçe'ye bağlama kısayolu), `/setler`, `/grafik`, `/csv`, `/saglik`,
+`/yedek`, `/yardim`. Alarm mesajlarının altında da hızlı aksiyonlar
+vardır: **✅ Aldım** (izlemeyi bırakır) · **🔕 1 hafta sustur** ·
+**🎯 hedefi değiştir**. Eski numaralı komutlar (`/sil 3`, `/hedef 3 12750`,
+`/akakce 3`) geriye uyum için hâlâ çalışır.
+
+**Hedef altında kaldıkça düzenli hatırlatma:** `renotify_minutes` (varsayılan
+240 = 4 saat) ayarıyla, fiyat hedefin altında kaldığı sürece bu aralıkla
+tekrar bildirim gelir — ürünü silene ya da susturana kadar durmaz. Tek seferlik
+bildirim isteniyorsa `renotify_minutes: 0` yapıp ürünün kendi
+`cooldown_minutes`'i geçerli olsun.
 
 **📦 Setler (PC toplama):** karttaki *Sete ekle* ile ürünleri grupla
 ("PC Toplama" gibi) → `/setler`'de **canlı toplam** + dünle kıyas + set hedefi.
@@ -124,6 +139,19 @@ Katmanlar: işletim sistemi gözetmeni ayakta tutar, gözetmen botu. Gözetmen
 bilerek **sadece stdlib** kullanır ve sistem Python'uyla çalışır — venv bozulsa
 bile güncelleme mekanizması ölmez. Gözetmenin kendisi de repodan güncellenir
 (önce derleme kontrolünden geçer).
+
+**Tek-kopya kilidi:** bot açılışta `bot.lock` üzerinde exclusive dosya kilidi
+alır (flock) — yanlışlıkla/yeniden başlatma sırasında ikinci bir kopya asla
+aynı anda Telegram'a bağlanamaz (aksi halde iki instance `getUpdates` için
+yarışır, butonlar aralıklı cevap verir). Eski kopya kapanana kadar yenisi
+bekler; kilit process ölünce (çökme dahil) OS tarafından otomatik bırakılır.
+
+**Zombi motor tespiti:** Playwright'ın arka plan motoru (driver) bazen süreç
+canlıyken sessizce ölebilir — bot "çalışıyor" görünür ama ne fiyat okur ne
+Telegram'a cevap verir (gözetmen bunu çökme saymaz). Bot artık bu durumu
+("pipe closed", "driver kapandı" gibi hata izleriyle) kendisi fark edip
+`os._exit(75)` ile kapanır; gözetmen taze bir motorla otomatik yeniden
+başlatır. Elle müdahale gerekmez.
 
 **macOS:** `com.takip-botu.plist` içindeki yolları kontrol et, sonra:
 ```bash
@@ -190,6 +218,8 @@ Akakçe'de en ucuz satıcının adı da bildirime eklenir.
 | `calistir.bat` | Windows başlatıcı (gözetmeni ayakta tutar) |
 | `takip-botu.service` | Linux/RaspberryPi systemd şablonu (gözetmeni ayakta tutar) |
 | `guncelleyici_state.json` | Gözetmen durumu: son iyi sürüm + bozuk commit (otomatik) |
+| `bot.lock` | Tek-kopya kilidi (otomatik oluşur, boş bırakılabilir) |
+| `yedek.zip` | Haftalık otomatik yedek (Telegram'a da gönderilir) |
 | `tests/` | pytest birim testleri (parser, karar, göç, veri, grafik, arayüz) |
 | `.github/workflows/ci.yml` | CI: ruff + mypy + testler + smoke — hata push anında görünür |
 
@@ -209,10 +239,16 @@ Disk asla dolmaz: `takip.log` 5 MB'da döner (en çok ~15 MB), `guncelleyici.log
 2 MB'da döner (~4 MB), tarayıcı profili önbelleği 700 MB'ı aşarsa bot yeniden
 başlarken otomatik temizlenir (çerezler/oturumlar korunur;
 `TAKIP_PROFIL_LIMIT_MB` ile ayarlanır).
-| `state.json` | Bildirim durumu + günlük minimumlar (otomatik oluşur) |
-| `fiyat_gecmisi.csv` | Her okuma: `zaman;urun;site;fiyat;stok;kaynak` |
-| `takip.log` | Çalışma logu |
-| `.chrome-profile-bot/` | Kalıcı tarayıcı profili (çerezler) — **git'e girmez!** |
+
+## Otomatik yedekleme + sağlık kontrolü
+
+`veri.db` + `state.json` + `telegram_urunler.yaml` haftada bir (`backup_days`)
+zip'lenip **Telegram sohbetine** gönderilir — yedek bilerek makine dışında
+durur, disk ölse bile fiyat geçmişin/setlerin/hedeflerin kurtarılabilir.
+Elle almak için `/yedek` ya da menüden **🗄 Şimdi yedekle**.
+
+`/saglik` (+ menüde 🩺): ayakta süresi, kaç ürün okunamıyor, veri.db/profil
+boyutu, son yedek zamanı, çalışan git commit'i — telefondan öz-teşhis.
 
 ## Nasıl karar veriyor? (tasarım kararları)
 
@@ -226,11 +262,22 @@ başlarken otomatik temizlenir (çerezler/oturumlar korunur;
    ve sonrasında tam 3 hane geliyorsa binliktir.
 
 3. **Şüpheli fiyat koruması (sanity guard)** — yanlış alarmın ana kaynağı parse
-   hatasıdır. Fiyat şu üç durumdan birine giriyorsa *hemen bildirilmez*, 1-2 dk
+   hatasıdır. Fiyat şu durumlardan birine giriyorsa *hemen bildirilmez*, 1-2 dk
    sonra ikinci okumayla (±%2 tutarlılık) doğrulanır:
    - kaynak `regex` (düşük güven),
    - hedef fiyatın yarısından da ucuz,
-   - son iyi fiyata göre %40'tan fazla ani düşüş.
+   - son iyi fiyata göre %40'tan fazla ani düşüş **veya %80'den fazla ani
+     yükseliş** (bir pazaryeri satıcısının hatalı girdiği fiyatı Akakçe
+     "en ucuz" diye gösterebiliyor — kaynak güvenilir olsa da veri hatalı olabilir).
+
+   **Kalıcı-bozuk-kaynak koruması:** yukarıdakinden de aşırısı — regex kaynaklı
+   ve hedefin %20'sinden de ucuz, ya da son iyi fiyatın 3 katından fazla —
+   normal 2-okuma tutarlılığıyla **asla** otomatik doğrulanmaz. Sebep: bozuk
+   bir sayfa/hatalı satıcı listesi kendisiyle saatlerce hatta günlerce
+   "tutarlı" kalabilir (iki gerçek vaka: kırık bir link genel kategori
+   sayfasına düşüp hep aynı yanlış fiyatı vermişti; bir pazaryeri satıcısı
+   günlerce gerçek değerin katları fiyatla listelenmişti). Üç başarısız
+   denemeden sonra tek seferlik "kaynak muhtemelen kırık" uyarısı gelir.
 
 4. **Çoklu kaynak + en ucuz seçimi** — ürünün tüm kaynakları okunur, geçerli en
    düşük fiyat bildirime esas olur; her kaynak ayrı ayrı CSV'ye loglanır (grafikte
@@ -247,9 +294,12 @@ başlarken otomatik temizlenir (çerezler/oturumlar korunur;
 7. **Bildirim güvenilirliği** — Telegram 3 deneme + üstel bekleme; hepsi patlarsa
    CallMeBot yedeğine düşer; o da patlarsa ERROR log. Sessiz kayıp yok.
 
-8. **Sessiz ölüm koruması** — günlük heartbeat (fiyat özeti dahil), 12 saatten
-   eski okumalara ⚠️ işareti, üst üste 5 başarısız okumada tek seferlik uyarı.
-   Fiyatın hiç okunamadığı turlar da artık hata serisine sayılır.
+8. **Sessiz ölüm koruması** — günlük heartbeat artık tam liste değil
+   **değişenler raporu** (son 24 saatte düşen/yükselen top 5 + set toplamları
+   + okunamayan sayısı), 12 saatten eski okumalara ⚠️ işareti, üst üste 5
+   başarısız okumada tek seferlik uyarı. Fiyatın hiç okunamadığı turlar da
+   hata serisine sayılır. Süreç canlıyken motor sessizce ölürse (zombi durum)
+   bot bunu kendisi fark edip kapanır, gözetmen taze başlatır (yukarıda).
 
 9. **RAM disiplini** — her kontrol kendi sekmesini açar ve `finally` ile kapatır.
 
@@ -268,4 +318,4 @@ başlarken otomatik temizlenir (çerezler/oturumlar korunur;
 | `[ENGEL]` / `⛔` | Site bot koruması gösteriyor; bot kendini geri çeker. Sık oluyorsa `sleep_min/max` büyüt |
 | Telegram gitmiyor | `test` çalıştır; token ve chat_id'yi kontrol et |
 | Bot ölmüş, haberim yok | `heartbeat_hour` ayarlı olsun; istersen `callmebot_apikey` da doldur |
-| Grafik boş | Bot en az bir fiyat okumuş olmalı (`fiyat_gecmisi.csv` oluşmalı) |
+| Grafik boş | Bot en az bir fiyat okumuş olmalı (`veri.db` oluşmalı) |
