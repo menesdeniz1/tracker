@@ -24,9 +24,16 @@ def alarm_gerekli(prod: dict, s: dict) -> tuple[bool, str]:
 
 def fiyat_suphali(prod: dict, s: dict, st: dict) -> bool:
     """Parse hatası ihtimali: doğrulanmamış regex okuması, hedefin yarısından da
-    ucuz, veya son iyi fiyata göre %40'tan fazla ani düşüş → önce doğrula, sonra
-    bildir. Sadece hedef alarmını değil, 30-gün-dibi sinyalini ve state'e yazılan
-    fiyatı da korur (bozuk fiyat daily_min'e girerse 35 gün gerçek dibi maskeler)."""
+    ucuz, ani düşüş, VEYA ani anormal YÜKSELİŞ → önce doğrula, sonra bildir.
+    Sadece hedef alarmını değil, 30-gün-dibi sinyalini ve state'e yazılan
+    fiyatı da korur (bozuk fiyat daily_min'e girerse 35 gün gerçek dibi maskeler).
+
+    Yüksek-uçlu kontrol gerçek bir vakadan geliyor: Akakçe'nin kendi sayfasında
+    (json-ld — YÜKSEK GÜVEN kabul edilen kaynak) tek bir pazaryeri satıcısı
+    ("en ucuz" olarak öne çıkan ama fiyatı hatalı girilmiş biri) bir ürünü
+    gerçek değerinin 2-9 katı fiyatla listeleyebiliyor; Akakçe bunu "en ucuz"
+    diye gösteriyor. Kaynak güvenilir OLDUĞU için eskiden hiç yakalanmıyordu —
+    ani düşüş kontrolüyle simetrik olarak ani yükselişi de şüpheli sayıyoruz."""
     fp = s["price"]
     if fp is None:
         return False
@@ -41,6 +48,39 @@ def fiyat_suphali(prod: dict, s: dict, st: dict) -> bool:
     if thr and fp < thr * 0.5:
         return True
     if son_iyi and fp < son_iyi * 0.6:
+        return True
+    if son_iyi and fp > son_iyi * 1.8:
+        return True
+    return False
+
+
+def asiri_supheli(prod: dict, s: dict, st: dict) -> bool:
+    """Kaynağın YAPISAL OLARAK bozuk (yanlış sayfa ya da hatalı tekil
+    pazaryeri listesi) olduğunu gösteren AŞIRI sapmalar. Bu durumda normal
+    2-okuma tutarlılığı GEÇERSİZ sayılır — çünkü bozuk bir kaynak, DÜZELENE
+    KADAR kendisiyle saatlerce/günlerce 'tutarlı' kalabilir; iki ardışık
+    okumanın örtüşmesi doğruluk kanıtı değildir.
+
+    İki gerçek vaka bu korumayı doğurdu:
+      • DÜŞÜK: n11 linki genel 'Hard Disk' kategori sayfasına düşmüştü; regex
+        oradan hedefin (12.500 TL) çok altında sabit 1.260 TL okuyordu — sayfa
+        hep aynı yanlış değeri döndürdüğü için 'tutarlı' sayılıp iki kez
+        yanlış alarm gönderildi.
+      • YÜKSEK: Akakçe'nin KENDİ sayfasında (json-ld — güvenilir kaynak
+        sayılır) tek bir pazaryeri satıcısı ürünü gerçek değerinin 2-11 katı
+        fiyatla listelemişti; Akakçe bunu saatlerce 'en ucuz' gösterdi.
+        Kaynak güvenilir olsa da veri hatalıydı.
+
+    Sadece güvenilir bir kaynaktan gelen makul bir okuma ya da fiyatın
+    normal aralığa dönmesi bu durumu temizleyebilir."""
+    fp = s["price"]
+    if fp is None:
+        return False
+    thr = float(prod.get("price_threshold_tl", 0))
+    if s["source"] == "regex" and thr and fp < thr * 0.2:
+        return True
+    son_iyi = st.get("last_good_price")
+    if son_iyi and fp > son_iyi * 3:
         return True
     return False
 

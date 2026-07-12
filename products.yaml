@@ -79,7 +79,9 @@ products:
 
   - label: "Lexar NM790 2TB Gen4 NVMe SSD"
     urls:   # çoklu kaynak: en ucuzu bildirilir
-      - "https://www.n11.com/urun/lexar-nm790-lnm790x002t-rnnng-2-tb-m2-ssd-52729463"
+      # n11 linki KIRIK (genel "Hard Disk" kategori sayfasına düşüyordu, sahte
+      # 1.260 TL regex fiyatı iki yanlış alarma yol açtı) — Akakçe ile değiştirildi
+      - "https://www.akakce.com/ssd/en-ucuz-lexar-nm790-lnm790x002t-rnnng-pci-express-4-0-2-tb-m-2-fiyati,284873867.html"
       - "https://www.hepsiburada.com/lexar-nm790-2tb-gen4-7400-6500-sn-nvme-pcie-m-2-ssd-lnm790x002t-rnnng-pm-HBC0000EDSCNB"
     mode: price
     price_threshold_tl: 12500
@@ -299,7 +301,9 @@ products:
 
   # ---- Toplama listesi alternatifleri (Temmuz 2026'da eklendi) ----
   - label: "Patriot Viper Venom 32GB (2x16) DDR5 6000 CL30"
-    url: "https://www.hepsiburada.com/patriot-patriot-viper-venom-32gb-2x16gb-ddr5-6000mhz-cl30-gaming-ram-bellek-pvv532g600c30k-p-HBCV00006OXN4L"
+    urls:   # HB tek başına sık bot-korumasına takılıyordu; Akakçe yedek/birincil
+      - "https://www.akakce.com/ram/en-ucuz-patriot-viper-venom-32-gb-2x16-6000-mhz-cl30-pvv532g600c30k-ddr5-fiyati,690675232.html"
+      - "https://www.hepsiburada.com/patriot-patriot-viper-venom-32gb-2x16gb-ddr5-6000mhz-cl30-gaming-ram-bellek-pvv532g600c30k-p-HBCV00006OXN4L"
     mode: price
     price_threshold_tl: 27500
     cooldown_minutes: 1440

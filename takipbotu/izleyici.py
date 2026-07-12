@@ -17,7 +17,7 @@ from playwright.async_api import BrowserContext
 from . import konfig, veri
 from .bildirim import Notifier
 from .fiyat import kisa_tl, pct, tl
-from .karar import alarm_gerekli, en_iyi_kaynak, fiyat_suphali
+from .karar import alarm_gerekli, asiri_supheli, en_iyi_kaynak, fiyat_suphali
 from .tarayici import HostThrottle, Sites, check_once
 from .veri import State
 
@@ -121,8 +121,43 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                     # supheli bilerek 'gerekli'den bağımsız: şüpheli fiyat hedef
                     # alarmı tetiklemese de low30 sinyalini ve state'i kirletmesin
                     supheli = sanity_guard and fiyat_suphali(prod, best, st)
+                    # Kalıcı-bozuk-kaynak vakası (bkz. asiri_supheli docstring):
+                    # bozuk bir sayfa/hatalı satıcı listesi kendisiyle saatlerce
+                    # 'tutarlı' okunabilir — bu yüzden bu durumda normal 2-okuma
+                    # tutarlılığı GEÇERSİZ sayılır.
+                    asiri = supheli and asiri_supheli(prod, best, st)
 
-                    if supheli:
+                    if asiri:
+                        st.pop("pending_price", None)   # 2-okuma onayı bu vakada uygulanmaz
+                        seri = int(st.get("asiri_supheli_streak", 0)) + 1
+                        st["asiri_supheli_streak"] = seri
+                        zaten_uyarildi = bool(st.get("asiri_supheli_uyarildi"))
+                        yon = "ucuz" if best["source"] == "regex" else "pahalı"
+                        # Uyarı gidene kadar hızlı tekrar dene (gerçekten geçici
+                        # bir hata mı diye); uyarı gittikten sonra siteyi
+                        # dövmemek için normal araliga don — kullanici duzeltene
+                        # kadar zaten okuma "en iyi" secimine girmeyecek.
+                        quick_recheck = not zaten_uyarildi
+                        logging.warning(f"[{label}] fiyat aşırı derecede {yon} "
+                                        f"({tl(fp)}, kaynak={best['source']}) — kaynak "
+                                        f"kırık olabilir, ASLA otomatik doğrulanmaz "
+                                        f"(seri: {seri}).")
+                        if seri == 3 and not zaten_uyarildi:
+                            st["asiri_supheli_uyarildi"] = True
+                            sebep = ("düşük güvenli (regex) olduğu için"
+                                     if best["source"] == "regex" else
+                                     "güvenilir kaynaktan gelse de son bilinen "
+                                     "fiyatın 3 katından fazla olduğu için")
+                            await notifier.send(
+                                f"⚠️ {label} kaynağı muhtemelen KIRIK: üst üste "
+                                f"{seri} kez aşırı derecede {yon} bir fiyat "
+                                f"({tl(fp)}) okundu ama {sebep} hiç doğrulanamadı. "
+                                "Muhtemelen kaynak sayfa yanlış bir yere düşüyor "
+                                "ya da tek bir pazaryeri satıcısının hatalı "
+                                "fiyatı — karttan ➕ ile başka bir kaynak ekle.")
+                    elif supheli:
+                        st.pop("asiri_supheli_streak", None)
+                        st.pop("asiri_supheli_uyarildi", None)
                         pend = st.get("pending_price")
                         # ikinci okuma öncekiyle ±%2 tutarlıysa fiyat gerçek kabul edilir
                         if pend and fp and abs(pend - fp) <= fp * 0.02:
@@ -138,6 +173,10 @@ async def product_watcher(context: BrowserContext, sites: Sites, throttle: HostT
                                             "1-2 dk içinde ikinci okumayla doğrulanacak.")
                     else:
                         st.pop("pending_price", None)
+                        st.pop("asiri_supheli_streak", None)
+                        st.pop("asiri_supheli_uyarildi", None)
+
+                    supheli = supheli or asiri
 
                     if fp is not None and not supheli:
                         # 30-gün dibi bugünkü okuma işlenmeden ÖNCE hesaplanmalı

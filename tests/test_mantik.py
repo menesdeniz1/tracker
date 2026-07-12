@@ -3,7 +3,7 @@
 seçimi, 30-gün-dibi hesapları, etiket yardımcıları."""
 from datetime import date, timedelta
 
-from takipbotu.karar import alarm_gerekli, en_iyi_kaynak, fiyat_suphali
+from takipbotu.karar import alarm_gerekli, asiri_supheli, en_iyi_kaynak, fiyat_suphali
 from takipbotu.konfig import _tekil_etiket, baslik_temizle, etiket_uret, product_key, product_urls
 from takipbotu.veri import dip30_oncesi, gunluk_min_guncelle, yedi_gun_degisim
 
@@ -69,6 +69,60 @@ def test_supheli_ani_dusus():
     st = {"last_good_price": 10000}
     assert fiyat_suphali({}, _sonuc(price=5500), st)      # %45 düşüş
     assert not fiyat_suphali({}, _sonuc(price=9500), st)  # normal
+
+
+# ---------- asiri_supheli (kalıcı-bozuk-kaynak koruması) ----------
+
+def test_asiri_supheli_dusuk_gercek_vaka():
+    """Gerçek vaka: n11 kategori sayfasına düşmüş, hedefin (12500) çok altında
+    (1260) regex fiyatı — bu ASLA 2-okuma tutarlılığıyla doğrulanmamalı."""
+    prod = {"price_threshold_tl": 12500}
+    assert asiri_supheli(prod, _sonuc(price=1260, source="regex"), {})
+
+
+def test_asiri_supheli_dusuk_esik_siniri():
+    prod = {"price_threshold_tl": 10000}
+    assert asiri_supheli(prod, _sonuc(price=1999, source="regex"), {})      # %20'nin altı
+    assert not asiri_supheli(prod, _sonuc(price=2500, source="regex"), {})  # tam %25 — degil
+
+
+def test_asiri_supheli_dusuk_sadece_regex_kaynaginda():
+    """Aynı düşük fiyat json-ld/seçici gibi güvenilir kaynaktan gelirse
+    'aşırı düşük regex' değildir — gerçek bir fırsat olabilir."""
+    prod = {"price_threshold_tl": 12500}
+    assert not asiri_supheli(prod, _sonuc(price=1260, source="json-ld"), {})
+    assert not asiri_supheli(prod, _sonuc(price=1260, source="seçici"), {})
+
+
+def test_asiri_supheli_dusuk_hedefsiz_urunde_tetiklenmez():
+    assert not asiri_supheli({}, _sonuc(price=100, source="regex"), {})
+
+
+def test_asiri_supheli_dusuk_fiyatsizda_tetiklenmez():
+    prod = {"price_threshold_tl": 10000}
+    assert not asiri_supheli(prod, _sonuc(price=None, source="regex"), {})
+
+
+def test_asiri_supheli_yuksek_gercek_vaka():
+    """Gerçek vaka: Akakçe'de tek bir pazaryeri satıcısı ('TRENDYPAZARS')
+    ürünü gerçek fiyatının katları ile listelemişti — json-ld (GÜVENİLİR
+    kaynak) olmasına rağmen son iyi fiyatın 3 katından fazlaysa şüpheli."""
+    st = {"last_good_price": 55499.0}
+    assert asiri_supheli({}, _sonuc(price=484424.80, source="json-ld"), st)  # ~8.7x
+    assert asiri_supheli({}, _sonuc(price=119567.84, source="json-ld"),
+                         {"last_good_price": 10495.0})                       # ~11.4x
+
+
+def test_asiri_supheli_yuksek_esik_siniri():
+    st = {"last_good_price": 10000}
+    assert asiri_supheli({}, _sonuc(price=30001, source="json-ld"), st)      # 3x'in üstü
+    assert not asiri_supheli({}, _sonuc(price=18000, source="json-ld"), st)  # normal şüpheli ama asiri değil
+
+
+def test_asiri_supheli_yuksek_gecmis_yoksa_tetiklenmez():
+    """İlk okumada (last_good_price yok) aşırı-yüksek kontrolü uygulanamaz —
+    karşılaştıracak bir geçmiş olmalı."""
+    assert not asiri_supheli({}, _sonuc(price=999999, source="json-ld"), {})
 
 
 # ---------- en_iyi_kaynak (Akakçe birincil kurgusunun kalbi) ----------
