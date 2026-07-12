@@ -350,6 +350,14 @@ products:
     sleep_min: 1800
     sleep_max: 3600
 
+  - label: "U-Do Sit&Stand Yükseklik Ayarlı Çalışma Masası"
+    url: "https://shop.nurus.com/products/u-do-yukseklik-ayarli-calisma-masasi-hdf-toz-boya?variant=51803922268465"
+    mode: price
+    price_threshold_tl: 23500
+    cooldown_minutes: 1440
+    sleep_min: 1800
+    sleep_max: 3600
+
   # ---- ÖRNEK: eski stock-bot'taki gibi beden/stok takibi (kapalı) ----
   - label: "Örnek Ayakkabı 42 Numara"
     url: "https://ornek-site.com/urun/ayakkabi"
