@@ -1,5 +1,10 @@
 # Takip Botu PRO — TR E-Ticaret Fiyat & Stok Takibi (Telegram + Akakçe)
 
+Python price and stock tracker for Turkish e-commerce sites, with Telegram
+notifications, price history, and service/update tooling. Site parsers can break
+when page layouts change. Supply your own credentials locally; never commit
+tokens, chat configuration, or runtime data. Setup instructions below are in Turkish.
+
 Amazon.tr, Hepsiburada, N11, Trendyol, Akakçe, Tebilon vb. sitelerden PC parçası
 fiyat/stok takibi yapar, hedef tutunca **Telegram'a** bildirim atar. Aynı ürünü
 birden çok kaynaktan (Akakçe birincil) izleyip **en ucuzunu** bildirir.
